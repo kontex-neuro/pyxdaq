@@ -1,0 +1,50 @@
+name: Build Self Diagnosis Tool
+
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        # os: [windows-2022, macos-13, ubuntu-22.04]
+        os: [windows-2022, macos-13]
+    name: ${{ matrix.os }}-build
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install .
+          pip install pyinstaller
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-2022'
+        run: >
+          pyinstaller --noconfirm
+          --add-data "config;config"
+          --add-data "bitfiles;bitfiles"
+          --collect-data pyxdaq
+          -p pyxdaq/okFrontPanel
+          -c ./scripts/self_diagnosis.py
+      
+      - name: Build (Unix)
+        if: matrix.os != 'windows-2022'
+        run: >
+          pyinstaller --noconfirm
+          --add-data "config:config"
+          --add-data "bitfiles:bitfiles"
+          --collect-data pyxdaq
+          -p pyxdaq/okFrontPanel
+          -c ./scripts/self_diagnosis.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v2
+        with:
+          name: self_diagnosis ${{ matrix.os }}
+          path: dist/self_diagnosis

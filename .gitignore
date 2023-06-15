@@ -18,3 +18,8 @@ __pycache__
 
 # Project
 /diagnostic_report.json
+
+# PyInstaller
+/dist
+/build
+/*.spec

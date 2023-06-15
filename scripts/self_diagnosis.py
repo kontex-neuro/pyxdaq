@@ -78,6 +78,7 @@ def main():
     try:
         from pyxdaq.board import OkBoard
         from pyxdaq.xdaq import XDAQModel,XDAQ
+        from pyxdaq.constants import SampleRate
 
         def get_device():
             dev = ok.okCFrontPanel()
@@ -109,7 +110,6 @@ def main():
 
             raise RuntimeError('No supported device found')
 
-
         xdaq = get_device()
     
         diagnostic_report['xdaq_info'] = str(xdaq.xdaqinfo)
@@ -128,7 +128,6 @@ def main():
     console.print('\nDetecting Recording X-Headstages ...', end='')
 
     try:
-        from pyxdaq.constants import SampleRate
         xdaq.initialize()
         xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, False)
         xdaq.findConnectedAmplifiers()
@@ -152,6 +151,7 @@ def main():
     console.print('\nDetecting Stim-Record X-Headstages ...', end='') 
     try:
         xdaq.config_fpga(True, 'bitfiles/xsr7310a75.bit')
+        diagnostic_report['fpga_rhs'] = '{:X}'.format(xdaq.xdaqinfo.fpga)
         xdaq.initialize()
         xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
         xdaq.findConnectedAmplifiers()
@@ -161,7 +161,7 @@ def main():
         for n, port in enumerate(xdaq.ports):
             channels = sum(s.chip.num_channels_per_stream() for s in port)
             tb.add_column(f"Port {n+1} [{channels}] Channels", justify="left", style="cyan", width=30)
-        for row in list(zip(*xdaq.ports))[:2 if xdaq.xdaqinfo.rhs == 32 else 1]:
+        for row in list(zip(*xdaq.ports))[:2 if xdaq.xdaqinfo.rhs >= 32 else 1]:
             tb.add_row(*map(str, row[:rhs_ports]))
         diagnostic_report['xdaq_rhs'] = str(xdaq.ports)
         console.print('[Done]', style='bold green')
@@ -175,6 +175,6 @@ def main():
 
 if __name__ == '__main__':
     main()
-    with open('diagnostic_report.json','w') as f:
-        json.dump(diagnostic_report,f,indent=4)
+    Path('diagnostic_report.json').write_text(json.dumps(diagnostic_report, indent=4))
     print('diagnostic_report.json is generated.')
+    input('Press Any Key to Exit...')
