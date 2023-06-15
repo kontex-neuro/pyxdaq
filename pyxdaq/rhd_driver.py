@@ -122,3 +122,6 @@ class RHDDriver(IntanHeadstage):
         cmd.extend(self.encode('write', addr=addr) for addr in range(18, 22))
         cmd.extend([self.encode('dummy')] * (128 - len(cmd)))
         return cmd
+
+    def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
+        return self.get_zcheck_cmds(frequency, amplitude, 6, maxlength)

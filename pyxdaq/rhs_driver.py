@@ -106,3 +106,7 @@ class RHSDriver(IntanHeadstage):
     @_pack_instructions
     def dummy(self, n):
         return [self.encode('dummy')] * n
+
+    @_pack_instructions
+    def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
+        return self.get_zcheck_cmds(frequency, amplitude, 3, maxlength)

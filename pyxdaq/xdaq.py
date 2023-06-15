@@ -1,7 +1,7 @@
 import math
 import time
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import List, Tuple, Union
@@ -9,16 +9,20 @@ from typing import List, Tuple, Union
 import numpy as np
 from dataclass_wizard import JSONWizard
 
-from .board import Board
-from .constants import XDAQMCU, HeadstageChipID, HeadstageChipMISOID, SampleRate, XDAQWireOut
+from .board import Board, OkBoard
+from .constants import (
+    RHD, RHS, XDAQMCU, HeadstageChipID, HeadstageChipMISOID, SampleRate, XDAQWireOut
+)
 from .datablock import DataBlock
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
 
+
 class XDAQModel(Enum):
-    UNKNOWN = 0
-    CORE = 1
-    ONE = 3
+    NA = 0
+    One = 3
+    Core = 1
+
 
 @dataclass
 class XDAQInfo:
@@ -31,28 +35,47 @@ class XDAQInfo:
     expr: int
     xprt: int
 
+    rhd: int
+    rhs: int
+    din: int
+    dout: int
+    ain: int
+    aout: int
+    model: XDAQModel
+    serial_str: str
+
     @staticmethod
     def _parse_hdmi(hdmi):
         return 32 * (hdmi >> 24), 16 * (hdmi >> 16 & 0xff), hdmi >> 8 & 0xff
 
-    @property
-    def model(self):
-        _, _, model = self._parse_hdmi(self.hdmi)
-        return XDAQModel(model)
+    @staticmethod
+    def _parse_fpga(fpga):
+        fpga = str(fpga)
+        v = int(fpga[8:]) - 1
+        return fpga[:4], fpga[4:6], fpga[6:8], chr(v + ord('a'))
 
-    @property
-    def rhd(self):
-        rhd, _, _ = self._parse_hdmi(self.hdmi)
-        if self.model == XDAQModel.ONE:
-            return rhd
-        elif self.model == XDAQModel.CORE:
-            return rhd // 2
-        return 0
+    @staticmethod
+    def _parse_daio(daio):
+        return daio >> 24, daio >> 16 & 0xff, daio >> 8 & 0xff, daio & 0xff
 
-    @property
-    def rhs(self):
-        _, rhs, _ = self._parse_hdmi(self.hdmi)
-        return rhs
+    @classmethod
+    def from_board(cls, board: Board):
+        serial = board.GetWireOutValue(XDAQWireOut.Serial)
+        hdmi = board.GetWireOutValue(XDAQWireOut.Hdmi, False)
+        daio = board.GetWireOutValue(XDAQWireOut.Daio, False)
+        rhd, rhs, model = XDAQInfo._parse_hdmi(hdmi)
+        model = XDAQModel(model)
+        if model == XDAQModel.Core:
+            rhd //= 2
+        din, dout, ain, aout = XDAQInfo._parse_daio(daio)
+        return cls(
+            serial, hdmi, board.GetWireOutValue(XDAQWireOut.Fpga, False), daio,
+            board.GetWireOutValue(XDAQWireOut.Oled, False),
+            board.GetWireOutValue(XDAQWireOut.Vido, False),
+            board.GetWireOutValue(XDAQWireOut.Expr, False),
+            board.GetWireOutValue(XDAQWireOut.Xprt, False), rhd, rhs, din, dout, ain, aout, model,
+            f'{serial:X}'
+        )
 
     def __repr__(self):
         return self.__str__()
@@ -213,17 +236,29 @@ class XDAQPorts(JSONWizard):
         for port in range(self.num_ports):
             yield self.streams[port * streams_per_port:(port + 1) * streams_per_port]
 
+    def group_by_chip(self):
+        streams_per_chip = (2 if self.ddr else 1)
+        for chip in range(self.spi_per_port * self.chips_per_spi * self.num_ports):
+            yield self.streams[chip * streams_per_chip:(chip + 1) * streams_per_chip]
 
-class XDAQ(Board):
+
+class XDAQ:
+    dev: Board
+    expander: bool = None
     xdaqinfo: XDAQInfo = None
     spiPorts: int = 4
     mode32DIO: bool = False
     ports: XDAQPorts = None
     debug: bool = False
     sampleRate: SampleRate = None
+    rhs: bool = None
+    ep: Union[RHD, RHS, None] = None
 
-    def __init__(self, config_root, debug: bool = False):
-        super().__init__(debug)
+    def __init__(self, config_root: str = 'config', debug: bool = False, dev: Board = None):
+        if dev is not None:
+            self.dev = dev
+        else:
+            self.dev = OkBoard(debug)
         self.config_root = Path(config_root)
 
     def getreg(self, sample_rate: SampleRate) -> Union[RHDDriver, RHSDriver]:
@@ -236,7 +271,7 @@ class XDAQ(Board):
         )
 
     def get_xdaq_status(self) -> XDAQMCU:
-        value = self.GetWireOutValue(self.ep.WireOutXDAQStatus)
+        value = self.dev.GetWireOutValue(self.ep.WireOutXDAQStatus)
         testbit = lambda x: (value & x.value) == x.value
         if testbit(XDAQMCU.MCU_BUSY):
             return XDAQMCU.MCU_BUSY
@@ -249,50 +284,52 @@ class XDAQ(Board):
         return XDAQMCU.MCU_BUSY
 
     def detect_expander(self):
-        start = time.time()
-        while self.get_xdaq_status() == XDAQMCU.MCU_BUSY:
-            if time.time() - start > 5:
-                raise RuntimeError("Unable to detect MCU status")
-            time.sleep(0.1)
-        expanderBoardDetected = self.GetWireOutValue(self.ep.ExpanderInfo) != 0
-        expanderBoardIdNumber = (self.GetWireOutValue(self.ep.WireOutSerialDigitalIn) >> 3) & 1
+        expanderBoardDetected = self.dev.GetWireOutValue(self.ep.ExpanderInfo) != 0
+        expanderBoardIdNumber = (self.dev.GetWireOutValue(self.ep.WireOutSerialDigitalIn) >> 3) & 1
         return expanderBoardDetected, expanderBoardIdNumber
 
     def config_fpga(self, rhs: bool = False, bitfile: str = None) -> Tuple[int, int]:
-        r = super().config_fpga(rhs, bitfile)
+        if bitfile is None:
+            bitfile = 'bitfiles/x{}r7310a75.bit'.format('s' if rhs else '')
+        self.dev.config_fpga(bitfile)
+        self.ep = RHS if rhs else RHD
+        start = time.time()
+        while self.get_xdaq_status() == XDAQMCU.MCU_BUSY:
+            time.sleep(0.1)
+            if time.time() - start > 3:
+                raise RuntimeError('XDAQ MCU did not start in time')
+        self.rhs = rhs
+        boardId = self.dev.GetWireOutValue(self.ep.WireOutBoardId)
+        boardVersion = self.dev.GetWireOutValue(self.ep.WireOutBoardVersion, False)
+        self.reset_board()
+        self.expander = self.detect_expander()
         self.ports = XDAQPorts.default(2, 1 if rhs else 2, False if rhs else True)
-        return r
+        self.xdaqinfo = XDAQInfo.from_board(self.dev)
+        return boardId, boardVersion
 
     def set32DIO(self, enable: bool):
         self.mode32DIO = enable
-        self.SetWireInValue(self.ep.Enable32bitDIO, 0x04 * enable, 0x04)
-
-    def getXDAQInfo(self):
-        return XDAQInfo(
-            self.GetWireOutValue(XDAQWireOut.Serial),
-            self.GetWireOutValue(XDAQWireOut.Hdmi, False),
-            self.GetWireOutValue(XDAQWireOut.Fpga, False),
-            self.GetWireOutValue(XDAQWireOut.Daio, False),
-            self.GetWireOutValue(XDAQWireOut.Oled, False),
-            self.GetWireOutValue(XDAQWireOut.Vido, False),
-            self.GetWireOutValue(XDAQWireOut.Expr, False),
-            self.GetWireOutValue(XDAQWireOut.Xprt, False),
-        )
+        self.dev.SetWireInValue(self.ep.Enable32bitDIO, 0x04 * enable, 0x04)
 
     def reset_board(self):
-        super().reset_board()
+        """
+        This clears all auxiliary command RAM banks, clears the USB FIFO, and resets the
+        per-channel sampling rate to 30.0 kS/s/ch.
+        """
+        self.dev.SetWireInValue(self.ep.WireInResetRun, 1, 1)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, 0, 1)
         # usb3 configuration
-        self.SendMultiUse(self.ep.TrigInConfig, 9, 1024 // 4)
-        self.SendMultiUse(self.ep.TrigInConfig, 10, 32)
+        self.dev.SendTrig(self.ep.TrigInConfig, 9, self.ep.WireInMultiUse, 1024 // 4)
+        self.dev.SendTrig(self.ep.TrigInConfig, 10, self.ep.WireInMultiUse, 32)
 
     def run(self):
-        self.ActivateTriggerIn(self.ep.TrigInSpiStart, 0)
+        self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 0)
 
     def is_running(self):
-        return self.GetWireOutValue(self.ep.WireOutSpiRunning)
+        return self.dev.GetWireOutValue(self.ep.WireOutSpiRunning)
 
     def numWordsInFifo(self):
-        return self.GetWireOutValue(self.ep.WireOutNumWords)
+        return self.dev.GetWireOutValue(self.ep.WireOutNumWords)
 
     def flush(self):
         raise NotImplementedError
@@ -318,9 +355,9 @@ class XDAQ(Board):
             bank = bank << 4 | bank
             bank = bank << 8 | bank
             bank = bank << 16 | bank
-            self.SetWireInValue(ep, bank)
+            self.dev.SetWireInValue(ep, bank)
         else:
-            self.SetWireInValue(ep, bank << (port * 4), 0xf << (port * 4))
+            self.dev.SetWireInValue(ep, bank << (port * 4), 0xf << (port * 4))
 
     def selectAuxCommandLength(self, auxCommandSlot, loopIndex, endIndex):
         """
@@ -335,45 +372,49 @@ class XDAQ(Board):
         if endIndex < 0 or endIndex > maxidx:
             raise Exception("endIndex out of range")
         if self.rhs:
-            self.SendMultiUse(self.ep.TrigInAuxCmdLength, auxCommandSlot + 4, loopIndex)
-            self.SendMultiUse(self.ep.TrigInAuxCmdLength, auxCommandSlot, endIndex)
+            self.dev.SendTrig(
+                self.ep.TrigInAuxCmdLength, auxCommandSlot + 4, self.ep.WireInMultiUse, loopIndex
+            )
+            self.dev.SendTrig(
+                self.ep.TrigInAuxCmdLength, auxCommandSlot, self.ep.WireInMultiUse, endIndex
+            )
         else:
-            self.SetWireInValue(
+            self.dev.SetWireInValue(
                 self.ep.WireInAuxCmdLoop, loopIndex << (auxCommandSlot * 10), 0x000003ff <<
                 (auxCommandSlot * 10), False
             )
-            self.SetWireInValue(
+            self.dev.SetWireInValue(
                 self.ep.WireInAuxCmdLength, endIndex << (auxCommandSlot * 10), 0x000003ff <<
                 (auxCommandSlot * 10)
             )
 
     def _isDcmProgDone(self):
-        return (self.GetWireOutValue(self.ep.WireOutDataClkLocked) & 0x0002) > 1
+        return (self.dev.GetWireOutValue(self.ep.WireOutDataClkLocked) & 0x0002) > 1
 
     def _isDataClockLocked(self):
-        return (self.GetWireOutValue(self.ep.WireOutDataClkLocked) & 0x0001) > 0
+        return (self.dev.GetWireOutValue(self.ep.WireOutDataClkLocked) & 0x0001) > 0
 
     def setSampleRate(self, sample_rate: SampleRate):
         self.sampleRate = sample_rate
         while not self._isDcmProgDone():
             time.sleep(0.01)
-        self.SetWireInValue(
+        self.dev.SetWireInValue(
             self.ep.WireInDataFreqPll, 256 * sample_rate.value[0] + sample_rate.value[1]
         )
         if self.rhs:
-            self.ActivateTriggerIn(self.ep.TrigInDcmProg, 0)
+            self.dev.ActivateTriggerIn(self.ep.TrigInDcmProg, 0)
         else:
-            self.ActivateTriggerIn(self.ep.TrigInConfig, 0)
+            self.dev.ActivateTriggerIn(self.ep.TrigInConfig, 0)
         while not self._isDataClockLocked():
             time.sleep(0.01)
 
     def setContinuousRunMode(self, enable: bool):
-        self.SetWireInValue(self.ep.WireInResetRun, 0x02 * enable, 0x02)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, 0x02 * enable, 0x02)
 
     def setMaxTimeStep(self, maxTimeStep: int):
         if maxTimeStep < 0 or maxTimeStep > 2**32 - 1:
             raise Exception("maxTimeStep out of range")
-        self.SetWireInValue(self.ep.WireInMaxTimeStep, maxTimeStep)
+        self.dev.SetWireInValue(self.ep.WireInMaxTimeStep, maxTimeStep)
 
     def setCableDelay(self, port: Union[int, str], delay: int):
         if delay < 0 or delay > 15:
@@ -383,9 +424,9 @@ class XDAQ(Board):
             delay = delay << 4 | delay
             delay = delay << 8 | delay
             delay = delay << 16 | delay
-            self.SetWireInValue(self.ep.WireInMisoDelay, delay)
+            self.dev.SetWireInValue(self.ep.WireInMisoDelay, delay)
         else:
-            self.SetWireInValue(self.ep.WireInMisoDelay, delay << (4 * port), 0xf << (4 * port))
+            self.dev.SetWireInValue(self.ep.WireInMisoDelay, delay << (4 * port), 0xf << (4 * port))
 
     @staticmethod
     def delayFromCableLength(length, sampleRate, unit):
@@ -411,11 +452,11 @@ class XDAQ(Board):
         return delay
 
     def setDspSettle(self, enable):
-        self.SetWireInValue(self.ep.WireInResetRun, enable * 0x4, 0x4)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, enable * 0x4, 0x4)
 
     def enableDataStream(self, stream: Union[int, str], enable: bool, force=False):
         if isinstance(stream, str) and stream == 'all':
-            self.SetWireInValue(self.ep.WireInDataStreamEn, (2**32 - 1) * enable)
+            self.dev.SetWireInValue(self.ep.WireInDataStreamEn, (2**32 - 1) * enable)
             # update cached value for all streams inside port object
             for s in self.ports.streams:
                 s.enabled = enable
@@ -423,7 +464,9 @@ class XDAQ(Board):
             if self.ports.streams[stream].enabled == enable:
                 if not force:
                     return
-            self.SetWireInValue(self.ep.WireInDataStreamEn, (0x1 * enable) << stream, 0x1 << stream)
+            self.dev.SetWireInValue(
+                self.ep.WireInDataStreamEn, (0x1 * enable) << stream, 0x1 << stream
+            )
             self.ports.streams[stream].enabled = enable
 
     @property
@@ -439,17 +482,17 @@ class XDAQ(Board):
             return
         if isinstance(channel, str) and channel == 'all':
             v = enable * 0xffff if isinstance(enable, bool) else enable & 0xffff
-            self.SetWireInValue(self.ep.WireInTtlOut, v)
+            self.dev.SetWireInValue(self.ep.WireInTtlOut, v)
             if self.mode32DIO:
                 v = enable * 0xffff if isinstance(enable, bool) else enable >> 16
-                self.SetWireInValue(self.ep.WireInTtlOut32, v)
+                self.dev.SetWireInValue(self.ep.WireInTtlOut32, v)
         else:
             ep = self.ep.WireInTtlOut if channel < 16 else self.ep.WireInTtlOut32
-            self.SetWireInValue(ep, int(enable) << (channel % 16), 1 << (channel % 16))
+            self.dev.SetWireInValue(ep, int(enable) << (channel % 16), 1 << (channel % 16))
 
     def _getDacEndpoint(self, dacChannel):
         if dacChannel < 0 or dacChannel > 7:
-            raise Exception("dacChannel out of range")
+            raise ValueError("dacChannel out of range")
         return [
             self.ep.WireInDacSource1, self.ep.WireInDacSource2, self.ep.WireInDacSource3,
             self.ep.WireInDacSource4, self.ep.WireInDacSource5, self.ep.WireInDacSource6,
@@ -458,25 +501,25 @@ class XDAQ(Board):
 
     def enableDac(self, channel: int, enable: bool):
         if channel < 0 or channel > 7:
-            raise Exception("channel out of range")
+            raise ValueError("channel out of range")
         bm = 0x0200 if self.rhs else 0x0800
-        self.SetWireInValue(self._getDacEndpoint(channel), enable * bm, bm)
+        self.dev.SetWireInValue(self._getDacEndpoint(channel), enable * bm, bm)
 
     def selectDacDataStream(self, channel: bool, stream: int):
         if channel < 0 or channel > 7:
-            raise Exception("channel out of range")
+            raise ValueError("channel out of range")
         if stream < 0 or stream > (9 if self.rhs else 33):
-            raise Exception("stream out of range")
-        self.SetWireInValue(
+            raise ValueError("stream out of range")
+        self.dev.SetWireInValue(
             self._getDacEndpoint(channel), stream << 5, 0x1e0 if self.rhs else 0x07e0
         )
 
     def selectDacDataChannel(self, dacChannel: bool, dataChannel: int):
         if dacChannel < 0 or dacChannel > 7:
-            raise Exception("dacChannel out of range")
+            raise ValueError("dacChannel out of range")
         if dataChannel < 0 or dataChannel > 31:
-            raise Exception("dataChannel out of range")
-        self.SetWireInValue(self._getDacEndpoint(dacChannel), dataChannel, 0x001f)
+            raise ValueError("dataChannel out of range")
+        self.dev.SetWireInValue(self._getDacEndpoint(dacChannel), dataChannel, 0x001f)
 
     def configDac(self, channel: int, enable: bool, stream: int, dataChannel: int):
         """
@@ -496,7 +539,7 @@ class XDAQ(Board):
         # RHD [enable:1bit, stream:6bit, dataChannel:5bit]
         # RHS [enable:1bit, stream:4bit, dataChannel:5bit]
         enablebit = 0x0200 if self.rhs else 0x0800
-        self.SetWireInValue(
+        self.dev.SetWireInValue(
             self._getDacEndpoint(channel), (enable * enablebit) | (stream << 5) | dataChannel,
             0x3fff if self.rhs else 0xffff
         )
@@ -508,17 +551,17 @@ class XDAQ(Board):
         """
         if value < 0 or value > 65535:
             raise Exception("value out of range")
-        self.SetWireInValue(self.ep.WireInDacManual, value)
+        self.dev.SetWireInValue(self.ep.WireInDacManual, value)
 
     def setDacGain(self, gain: int):
         if gain < 0 or gain > 7:
             raise Exception("gain out of range")
-        self.SetWireInValue(self.ep.WireInResetRun, gain << 13, 0xe000)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, gain << 13, 0xe000)
 
     def setAudioNoiseSuppress(self, noiseSuppress: int):
         if noiseSuppress < 0 or noiseSuppress > 127:
             raise Exception("noiseSuppress out of range")
-        self.SetWireInValue(self.ep.WireInResetRun, noiseSuppress << 6, 0x1fc0)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, noiseSuppress << 6, 0x1fc0)
 
     def setTTLMode(self, mode: Union[bool, List[bool]]):
         """
@@ -532,11 +575,11 @@ class XDAQ(Board):
                 val = sum(1 << i for i, v in enumerate(mode) if v)
             else:
                 raise Exception(f'invalid mode: {mode}')
-            self.SetWireInValue(self.ep.WireInTtlOutMode, val, 0xff)
+            self.dev.SetWireInValue(self.ep.WireInTtlOutMode, val, 0xff)
         else:
             if not isinstance(mode, bool):
                 raise Exception(f'invalid mode: {mode}')
-            self.SetWireInValue(self.ep.WireInResetRun, 8 * mode, 8)
+            self.dev.SetWireInValue(self.ep.WireInResetRun, 8 * mode, 8)
 
     def setDacThreshold(self, channel: int, threshold: int, trigPolarity: bool):
         if channel < 0 or channel > 7:
@@ -544,23 +587,23 @@ class XDAQ(Board):
         if threshold < 0 or threshold > 65535:
             raise Exception("threshold out of range")
         ep = self.ep.TrigInDacThresh if self.rhs else self.ep.TrigInDacConfig
-        self.SendMultiUse(ep, channel, threshold)
-        self.SendMultiUse(ep, channel + 8, int(trigPolarity))
+        self.dev.SendTrig(ep, channel, self.ep.WireInMultiUse, threshold)
+        self.dev.SendTrig(ep, channel + 8, self.ep.WireInMultiUse, int(trigPolarity))
 
     def enableExternalFastSettle(self, enable: bool):
-        self.SendMultiUse(self.ep.TrigInConfig, 6, int(enable))
+        self.dev.SendTrig(self.ep.TrigInConfig, 6, self.ep.WireInMultiUse, int(enable))
 
     def setExternalFastSettleChannel(self, channel: int):
         if channel < 0 or channel > 15:
             raise Exception("channel out of range")
-        self.SendMultiUse(self.ep.TrigInConfig, 7, channel)
+        self.dev.SendTrig(self.ep.TrigInConfig, 7, self.ep.WireInMultiUse, channel)
 
     def enableExternalDigOut(self, port: int, enable: bool):
         if self.rhs:
             return
         if port < 0 or port > 7:
             raise Exception("port out of range")
-        self.SendMultiUse(self.ep.TrigInDacConfig, 16 + port, int(enable))
+        self.dev.SendTrig(self.ep.TrigInDacConfig, 16 + port, self.ep.WireInMultiUse, int(enable))
 
     # Select which of the TTL inputs 0-15 is used to control the auxiliary digital output
     # pin of the chips connected to a particular SPI port, if external control of auxout is enabled.
@@ -571,7 +614,7 @@ class XDAQ(Board):
             raise Exception("port out of range")
         if channel < 0 or channel > 15:
             raise Exception("channel out of range")
-        self.SendMultiUse(self.ep.TrigInDacConfig, 24 + port, channel)
+        self.dev.SendTrig(self.ep.TrigInDacConfig, 24 + port, self.ep.WireInMultiUse, channel)
 
     def config_dac_ref(self, enable: bool, stream: int = 0, channel: int = 0):
         if stream < 0 or stream > (7 if self.rhs else 31):
@@ -580,18 +623,18 @@ class XDAQ(Board):
             raise Exception("channel out of range")
         if self.rhs:
             # this doesn't match the documentation, but RHX uses this implementation
-            self.SetWireInValue(
+            self.dev.SetWireInValue(
                 self.ep.WireInDacReref, (enable * 0x100) | (stream << 5) | channel, 0x1fff
             )
         else:
-            self.SetWireInValue(
+            self.dev.SetWireInValue(
                 self.ep.WireInDacReref, (enable * 0x400) | (stream << 5) | channel, 0x7fff
             )
 
     def enableAuxCommandsOnAllStreams(self):
         if not self.rhs:
             return
-        self.SetWireInValue(self.ep.WireInAuxEnable, 0xff, 0xff)
+        self.dev.SetWireInValue(self.ep.WireInAuxEnable, 0xff, 0xff)
 
     def setGlobalSettlePolicy(self, settle: List[bool], global_settle: bool):
         if not self.rhs:
@@ -599,29 +642,29 @@ class XDAQ(Board):
         if len(settle) != 4:
             raise Exception("settle must be a list of 4 booleans")
         v = sum(p * (1 << i) for i, p in enumerate(settle)) | (global_settle * 0x10)
-        self.SetWireInValue(self.ep.WireInGlobalSettleSelect, v, 0x1f)
+        self.dev.SetWireInValue(self.ep.WireInGlobalSettleSelect, v, 0x1f)
 
     def setStimCmdMode(self, enabled: bool):
         if not self.rhs:
             return
-        self.SetWireInValue(self.ep.WireInStimCmdMode, enabled * 0x1, 0x1)
+        self.dev.SetWireInValue(self.ep.WireInStimCmdMode, enabled * 0x1, 0x1)
 
     def enableDcAmpConvert(self, enabled: bool):
         if not self.rhs:
             return
-        self.SetWireInValue(self.ep.WireInDcAmpConvert, enabled * 0x1, 0x1)
+        self.dev.SetWireInValue(self.ep.WireInDcAmpConvert, enabled * 0x1, 0x1)
 
     def setExtraStates(self, states: int):
         if not self.rhs:
             return
-        self.SetWireInValue(self.ep.WireInExtraStates, states)
+        self.dev.SetWireInValue(self.ep.WireInExtraStates, states)
 
     def setAnalogInTriggerThreshold(self, threshold: float):
         if not self.rhs:
             return
         value = int(32768 * threshold / 10.24) + 32768
         value = max(0, min(65535, value))
-        self.SetWireInValue(self.ep.WireInAdcThreshold, value)
+        self.dev.SetWireInValue(self.ep.WireInAdcThreshold, value)
 
     def programStimReg(self, stream: int, channel: int, reg: int, value: int):
         # stream(0-7) * channel(0-15) = max 128
@@ -645,11 +688,11 @@ class XDAQ(Board):
         # 11 EventAmpSettleOnRepeat
         # 12 EventAmpSettleOffRepeat
         # 13 EventEnd
-        self.SetWireInValue(
+        self.dev.SetWireInValue(
             self.ep.WireInStimRegAddr, (stream << 8) | (channel << 4) | reg, update=False
         )
-        self.SetWireInValue(self.ep.WireInStimRegWord, value)
-        self.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 1)
+        self.dev.SetWireInValue(self.ep.WireInStimRegWord, value)
+        self.dev.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 1)
 
     def set_headstage_sequencer(self):
         return
@@ -698,7 +741,6 @@ class XDAQ(Board):
         self.setAnalogInTriggerThreshold(1.65)
         self.set_headstage_sequencer()
 
-        self.xdaqinfo = self.getXDAQInfo()
 
     def uploadCommandList(self, commandList: np.ndarray, auxCommandSlot, bank):
         if auxCommandSlot < 0 or auxCommandSlot > (2 + int(self.rhs)):
@@ -706,18 +748,18 @@ class XDAQ(Board):
         if bank < 0 or bank > 15:
             raise Exception("bank out of range")
         if self.rhs:
-            self.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 0)
+            self.dev.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 0)
             ep = [
                 self.ep.PipeInAuxCmd1, self.ep.PipeInAuxCmd2, self.ep.PipeInAuxCmd3,
                 self.ep.PipeInAuxCmd4
             ][auxCommandSlot]
-            self.WriteToBlockPipeIn(ep, 16, bytearray(commandList.tobytes(order='C')))
+            self.dev.WriteToBlockPipeIn(ep, 16, bytearray(commandList.tobytes(order='C')))
         else:
-            self.SetWireInValue(self.ep.WireInCmdRamBank, bank, update=False)
+            self.dev.SetWireInValue(self.ep.WireInCmdRamBank, bank)
             for i, cmd in enumerate(commandList):
-                self.SetWireInValue(self.ep.WireInCmdRamData, int(cmd), update=False)
-                self.SetWireInValue(self.ep.WireInCmdRamAddr, i)
-                self.ActivateTriggerIn(self.ep.TrigInConfig, auxCommandSlot + 1)
+                self.dev.SetWireInValue(self.ep.WireInCmdRamData, int(cmd), update=False)
+                self.dev.SetWireInValue(self.ep.WireInCmdRamAddr, i)
+                self.dev.ActivateTriggerIn(self.ep.TrigInConfig, auxCommandSlot + 1)
 
     def setDacHighpassFilter(self, cutoff: float, smapleRate: float):
         """
@@ -738,7 +780,7 @@ class XDAQ(Board):
             filterCoefficient = 1
         elif filterCoefficient > 65535:
             filterCoefficient = 65535
-        self.SendMultiUse(self.ep.TrigInConfig, 5, filterCoefficient)
+        self.dev.SendTrig(self.ep.TrigInConfig, 5, self.ep.WireInMultiUse, filterCoefficient)
 
     def uploadCommands(self, fastSettle: bool = False, update_stim: bool = False):
         reg = self.getreg(self.sampleRate)
@@ -806,7 +848,7 @@ class XDAQ(Board):
 
     def _getPipeInDACendpoint(self, dacChannel: int):
         if dacChannel < 0 or dacChannel > 7:
-            raise Exception("dacChannel out of range")
+            raise RuntimeError("dacChannel out of range")
         return [
             self.ep.PipeInDAC1, self.ep.PipeInDAC2, self.ep.PipeInDAC3, self.ep.PipeInDAC4,
             self.ep.PipeInDAC5, self.ep.PipeInDAC6, self.ep.PipeInDAC7, self.ep.PipeInDAC8
@@ -814,11 +856,11 @@ class XDAQ(Board):
 
     def uploadDACData(self, waveform: np.array, dacChannel: int, length: int):
         buffer = bytearray(self._encodeWaveform(waveform))
-        self.ActivateTriggerIn(self.ep.TrigInSpiStart, 2)
-        result = self.WriteToBlockPipeIn(self._getPipeInDACendpoint(dacChannel), 16, buffer)
+        self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 2)
+        result = self.dev.WriteToBlockPipeIn(self._getPipeInDACendpoint(dacChannel), 16, buffer)
         if result < 0:
-            raise Exception("Upload waveform WriteToBlockPipeIn failed")
-        self.SendMultiUse(self.ep.TrigInSpiStart, 8 + dacChannel, length)
+            raise RuntimeError("Upload waveform WriteToBlockPipeIn failed")
+        self.dev.SendTrig(self.ep.TrigInSpiStart, 8 + dacChannel, self.ep.WireInMultiUse, length)
 
     def uploadWaveform(self, waveform, channel, length):
 
@@ -836,10 +878,10 @@ class XDAQ(Board):
         # self.flush()
 
     def readDataToBuffer(self, buffer: bytearray):
-        return self.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
+        return self.dev.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
 
     def pipeoutThrottle(self, enable: bool):
-        self.SetWireInValue(self.ep.WireInResetRun, int(not enable) << 16, 1 << 16)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, int(not enable) << 16, 1 << 16)
 
     def disablePipeoutThrottle(self):
 
@@ -857,8 +899,8 @@ class XDAQ(Board):
         return Context(self)
 
     def discardFIFO(self):
-        self.SetWireInValue(self.ep.WireInResetRun, 1 << 17, 1 << 17)
-        self.SetWireInValue(self.ep.WireInResetRun, 0 << 17, 1 << 17)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, 1 << 17, 1 << 17)
+        self.dev.SetWireInValue(self.ep.WireInResetRun, 0 << 17, 1 << 17)
         fifo = self.numWordsInFifo() * 2
         with self.disablePipeoutThrottle():
             while fifo > 0:
@@ -972,10 +1014,10 @@ class XDAQ(Board):
 
     def setSpiLedDisplay(self, stat: List[bool]):
         value = sum(1 << i for i, v in enumerate(stat) if v)
-        self.SendMultiUse(self.ep.TrigInConfig, 8, value)
+        self.dev.SendTrig(self.ep.TrigInConfig, 8, self.ep.WireInMultiUse, value)
 
     def enableDacHighpassFilter(self, enable: bool):
-        self.SendMultiUse(self.ep.TrigInConfig, 4, 1 if enable else 0)
+        self.dev.SendTrig(self.ep.TrigInConfig, 4, self.ep.WireInMultiUse, 1 if enable else 0)
 
     def getBlockSizeBytes(self):
         return getBlocksizeInWords(self.rhs, self.mode32DIO, 128, self.numDataStream, 32) * 2

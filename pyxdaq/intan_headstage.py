@@ -194,3 +194,24 @@ class IntanHeadstage:
         actualLowerBandwidth = lowerBandwidthFromRL(rLActual)
 
         return actualLowerBandwidth, rLDac1, rLDac2, rLDac3
+
+    def get_zcheck_cmds(self, frequency: float, amplitude: float, register: int, maxlength: int):
+        if (amplitude < 0.0) or (amplitude > 128.0):
+            raise ValueError("Amplitude out of range.")
+        if frequency < 0.0:
+            raise ValueError("Negative frequency not allowed.")
+        elif frequency > self.sample_rate.value[2] / 4.0:
+            raise ValueError("Frequency too high relative to sampling rate.")
+
+        if frequency == 0.0:
+            return [
+                self.encode('writeval', addr=register, value=int(math.floor(amplitude)))
+            ] * maxlength
+        else:
+            period = round(self.sample_rate.value[2] / frequency)
+            if period > maxlength:
+                raise ValueError("Frequency too low relative to sampling rate.")
+
+            x = np.sin(np.linspace(0, 2 * np.pi, period)) * amplitude + 128
+            x = np.clip(np.round(x), 0, 255)
+            return [self.encode('writeval', addr=register, value=v) for v in map(int, x)]

@@ -24,6 +24,13 @@
                 { "bits": 8, "type": "REGISTER", "name": "addr" }
             ]
         },
+        "writeval": {
+            "opcode": 2,
+            "operands": [
+                { "bits": 6, "type": "ADDRESS", "name": "addr" },
+                { "bits": 8, "type": "VARIABLE", "name": "value" }
+            ]
+        },
         "read": {
             "opcode": 3,
             "operands": [
