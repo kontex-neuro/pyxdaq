@@ -1,0 +1,170 @@
+{
+    "width": 2,
+    "length": 256,
+    "named_registers": [
+        { "name": "muxBias", "reg": 0, "start": 0, "end": 5, "mode": "rw" },
+        { "name": "adcBufferBias", "reg": 0, "start": 6, "end": 11, "mode": "rw" },
+
+        { "name": "dspCutoffFreq", "reg": 1, "start": 0, "end": 3, "mode": "rw" },
+        { "name": "dspEn", "reg": 1, "start": 4, "end": 4, "mode": "rw", "default": 1 },
+        { "name": "absmode", "reg": 1, "start": 5, "end": 5, "mode": "rw" },
+        { "name": "twoscomp", "reg": 1, "start": 6, "end": 6, "mode": "rw" },
+        { "name": "weakMISO", "reg": 1, "start": 7, "end": 7, "mode": "rw", "default": 1 },
+        { "name": "digOut1HiZ", "reg": 1, "start": 8, "end": 8, "mode": "rw", "default": 1 },
+        { "name": "digOut1", "reg": 1, "start": 9, "end": 9, "mode": "rw" },
+        { "name": "digOut2HiZ", "reg": 1, "start": 10, "end": 10, "mode": "rw", "default": 1 },
+        { "name": "digOut2", "reg": 1, "start": 11, "end": 11, "mode": "rw" },
+        { "name": "digOutOD", "reg": 1, "start": 12, "end": 12, "mode": "rw" },
+
+        { "name": "zcheckEn", "reg": 2, "start": 0, "end": 0, "mode": "rw" },
+        { "name": "zcheckScale", "reg": 2, "start": 3, "end": 4, "mode": "rw" },
+        { "name": "zcheckLoad", "reg": 2, "start": 5, "end": 5, "mode": "rw" },
+        { "name": "zcheckDACPower", "reg": 2, "start": 6, "end": 6, "mode": "rw", "default": 1 },
+        { "name": "zcheckSelect", "reg": 2, "start": 8, "end": 13, "mode": "rw" },
+
+        { "name": "zcheckDAC", "reg": 3, "start": 0, "end": 7, "mode": "rw" },
+
+        { "name": "rh1Sel1", "reg": 4, "start": 0, "end": 5, "mode": "rw" },
+        { "name": "rh1Sel2", "reg": 4, "start": 6, "end": 10, "mode": "rw" },
+
+        { "name": "rh2Sel1", "reg": 5, "start": 0, "end": 5, "mode": "rw" },
+        { "name": "rh2Sel2", "reg": 5, "start": 6, "end": 10, "mode": "rw" },
+
+        { "name": "rlASel1", "reg": 6, "start": 0, "end": 6, "mode": "rw" },
+        { "name": "rlASel2", "reg": 6, "start": 7, "end": 12, "mode": "rw" },
+        { "name": "rlASel3", "reg": 6, "start": 13, "end": 13, "mode": "rw" },
+
+        { "name": "rlBSel1", "reg": 7, "start": 0, "end": 6, "mode": "rw" },
+        { "name": "rlBSel2", "reg": 7, "start": 7, "end": 12, "mode": "rw" },
+        { "name": "rlBSel3", "reg": 7, "start": 13, "end": 13, "mode": "rw" },
+
+        { "name": "acAmpPower", "reg": 8, "start": 0, "end": 15, "mode": "rw", "default": "0xFFFF" },
+        { "name": "ampFastSettle", "reg": 10, "start": 0, "end": 15, "mode": "rw" },
+        { "name": "ampFLSelect", "reg": 12, "start": 0, "end": 15, "mode": "rw" },
+        { "name": "stimEnableA", "reg": 32, "start": 0, "end": 15, "mode": "rw" },
+        { "name": "stimEnableB", "reg": 33, "start": 0, "end": 15, "mode": "rw" },
+
+        { "name": "stepSel1", "reg": 34, "start": 0, "end": 6, "mode": "rw" },
+        { "name": "stepSel2", "reg": 34, "start": 7, "end": 12, "mode": "rw" },
+        { "name": "stepSel3", "reg": 34, "start": 13, "end": 14, "mode": "rw" },
+
+        { "name": "stimNbias", "reg": 35, "start": 0, "end": 3, "mode": "rw" },
+        { "name": "stimPbias", "reg": 35, "start": 4, "end": 7, "mode": "rw" },
+
+        { "name": "chargeRecoveryDAC", "reg": 36, "start": 7, "end": 0, "mode": "rw" },
+
+        { "name": "ImaxSel1", "reg": 37, "start": 6, "end": 0, "mode": "rw" },
+        { "name": "ImaxSel2", "reg": 37, "start": 12, "end": 7, "mode": "rw" },
+        { "name": "ImaxSel3", "reg": 37, "start": 14, "end": 13, "mode": "rw" },
+
+        { "name": "dcAmpPower", "reg": 38, "start": 0, "end": 15, "mode": "rw", "default": "0xFF" },
+
+        { "name": "complianceMonitor", "reg": 40, "start": 0, "end": 15, "mode": "ro" },
+
+        { "name": "stimOn", "reg": 42, "start": 0, "end": 15, "mode": "ro" },
+
+        { "name": "stimPol", "reg": 44, "start": 0, "end": 15, "mode": "ro" },
+
+        { "name": "chargeRecoverySwitch", "reg": 46, "start": 0, "end": 15, "mode": "ro" },
+
+        { "name": "clChargeRecoveryEnable", "reg": 48, "start": 0, "end": 15, "mode": "ro" },
+
+        { "name": "faultCurrentDetect", "reg": 50, "start": 0, "end": 0, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude0", "reg": 64, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim0", "reg": 64, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude1", "reg": 65, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim1", "reg": 65, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude2", "reg": 66, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim2", "reg": 66, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude3", "reg": 67, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim3", "reg": 67, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude4", "reg": 68, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim4", "reg": 68, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude5", "reg": 69, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim5", "reg": 69, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude6", "reg": 70, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim6", "reg": 70, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude7", "reg": 71, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim7", "reg": 71, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude8", "reg": 72, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim8", "reg": 72, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude9", "reg": 73, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim9", "reg": 73, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude10", "reg": 74, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim10", "reg": 74, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude11", "reg": 75, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim11", "reg": 75, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude12", "reg": 76, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim12", "reg": 76, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude13", "reg": 77, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim13", "reg": 77, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude14", "reg": 78, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim14", "reg": 78, "start": 0, "end": 7, "mode": "ro" },
+
+        { "name": "negativeCurrentMagnitude15", "reg": 79, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "negativeCurrentTrim15", "reg": 79, "start": 0, "end": 7, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude0", "reg": 96, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim0", "reg": 96, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude1", "reg": 97, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim1", "reg": 97, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude2", "reg": 98, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim2", "reg": 98, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude3", "reg": 99, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim3", "reg": 99, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude4", "reg": 100, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim4", "reg": 100, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude5", "reg": 101, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim5", "reg": 101, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude6", "reg": 102, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim6", "reg": 102, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude7", "reg": 103, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim7", "reg": 103, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude8", "reg": 104, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim8", "reg": 104, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude9", "reg": 105, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim9", "reg": 105, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude10", "reg": 106, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim10", "reg": 106, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude11", "reg": 107, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim11", "reg": 107, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude12", "reg": 108, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim12", "reg": 108, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude13", "reg": 109, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim13", "reg": 109, "start": 8, "end": 15, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude14", "reg": 110, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim14", "reg": 110, "start": 0, "end": 7, "mode": "ro" },
+
+        { "name": "positiveCurrentMagnitude15", "reg": 111, "start": 0, "end": 7, "mode": "ro" },
+        { "name": "positiveCurrentTrim15", "reg": 111, "start": 0, "end": 7, "mode": "ro" }
+    ]
+}

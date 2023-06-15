@@ -1,0 +1,39 @@
+{
+    "opcode_bits": 2,
+    "instruction_bits": 16,
+    "operations": {
+        "convert": {
+            "opcode": 0,
+            "operands": [
+                { "bits": 6, "type": "VARIABLE", "name": "channel" },
+                { "bits": 8, "type": "IMMEDIATE", "value": 0 }
+            ]
+        },
+        "calibrate": {
+            "opcode": 1,
+            "operands": [{ "bits": 14, "type": "IMMEDIATE", "value": "0b01010100000000" }]
+        },
+        "clear": {
+            "opcode": 1,
+            "operands": [{ "bits": 14, "type": "IMMEDIATE", "value": "0b10101000000000" }]
+        },
+        "write": {
+            "opcode": 2,
+            "operands": [
+                { "bits": 6, "type": "ADDRESS", "name": "addr" },
+                { "bits": 8, "type": "REGISTER", "name": "addr" }
+            ]
+        },
+        "read": {
+            "opcode": 3,
+            "operands": [
+                { "bits": 6, "type": "ADDRESS", "name": "addr" },
+                { "bits": 8, "type": "IMMEDIATE", "value": 0 }
+            ]
+        },
+        "dummy": {
+            "opcode": 3,
+            "operands": [{ "bits": 14, "type": "IMMEDIATE", "value": "0b11111100000000" }]
+        }
+    }
+}

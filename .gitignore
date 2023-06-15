@@ -1,0 +1,20 @@
+# Python
+__pycache__
+*.pyc
+/build
+/*.egg-info
+
+# Editor
+*.swp
+/.vscode
+
+# Tools
+/.venv
+.ipynb_checkpoints
+/*.py
+
+# OS
+/.DS_Store
+
+# Project
+/diagnostic_report.json

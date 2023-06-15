@@ -1,0 +1,17 @@
+[project]
+name = "pyxdaq"
+version = "0.0.1"
+dependencies = ["dataclass_wizard", "numpy", "rich", "tqdm"]
+
+[tool.setuptools.packages.find]
+include = ["pyxdaq", "pyxdaq.*"]
+
+[build-system]
+requires = ["setuptools>=42.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+"pyxdaq.okFrontPanel" = ["*.dll", "*.so", "*.dylib"]
+
+[tool.yapfignore]
+ignore_patterns = ["pyxdaq/okFrontPanel/*.py"]
