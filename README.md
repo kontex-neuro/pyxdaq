@@ -16,6 +16,7 @@ python3 -m pip install .
 ```
 
 ### Windows
+* Open PowerShell (By shift+right click) at where you want to install the project and enter the following commands.
 ```powershell
 git clone https://github.com/kontex-neuro/pyxdaq.git
 cd pyxdaq
@@ -28,5 +29,5 @@ python -m pip install .
 
 ## Running the self diagnosis script
 ```shell
-python3 scripts/self_diagnosis.py
+python scripts/self_diagnosis.py
 ```
