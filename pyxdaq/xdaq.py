@@ -1329,7 +1329,15 @@ def get_XDAQ(
     debug: bool = False
 ):
     xdaq = XDAQ(config_root, debug=debug)
-    xdaq.config_fpga(rhs, bitfile)
+    for retry in range(2):
+        try:
+            xdaq.config_fpga(rhs, bitfile)
+            break
+        except Exception as e:
+            if retry == 1:
+                raise e
+            print(e)
+            print("retrying...")
     xdaq.initialize()
 
     # Set sample rate and upload all auxiliary SPI command sequences

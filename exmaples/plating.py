@@ -7,6 +7,12 @@ from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEven
 xdaq = get_XDAQ(rhs=True, bitfile='bitfiles/xsr7310a75.bit')
 
 print(xdaq.ports)
+# XDAQ supports up to 4 X3SR32 Headstages, each headstage has 2 streams and each stream has 16 channels
+# HDMI Port 0: Stream 0 (ch 0-16), Stream 1 (ch 16-31)
+# HDMI Port 1: Stream 2 (ch 0-16), Stream 3 (ch 16-31)
+# HDMI Port 2: Stream 4 (ch 0-16), Stream 5 (ch 16-31)
+# HDMI Port 3: Stream 6 (ch 0-16), Stream 7 (ch 16-31)
+# The get_XDAQ function will connect to the XDAQ and detect the number of headstages connected
 
 #%%
 
@@ -34,7 +40,7 @@ def pluses(mA: float, frequency: float):
         phase3_ms=0,
         # Use 10uA step size, the current will be truncated to the nearest 10uA
         step_size=StimStepSize.StimStepSize10uA,
-        # Amplitude of the first phase
+        # Current of the positive and negative phase, both value should be positive
         amp_neg_mA=0 if mA > 0 else -mA,
         amp_pos_mA=mA if mA > 0 else 0,
         # Please refer to Intan Manual for ampsettle and charge recovery
@@ -50,8 +56,53 @@ def pluses(mA: float, frequency: float):
         pulses=1,
     )
 
+# Swap out the pluses function with this one to send biphasic pluses
+def biphasic_pluses(mA: float, frequency: float):
+    """
+    Create a biphasic pluse
+             |---------|                   |---------|
+             |         |                   |         |
+    ---------|         |         |---------|         |
+                       |         |                   |
+                       |---------|                   |---------
+    |-delay--|                             |
+             |-phase1--|                   |-phase1--| ...
+                       |-phase2--|         |
+                                 | post    |
+                                   pluse   |
 
-def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, pluse_frequency):
+    |-----------------period---------------| = 1/frequency
+    """
+    period_ms = 1e3 / frequency
+    return (lambda **kwargs: kwargs)(
+        polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
+        shape=StimShape.Biphasic,
+        delay_ms=0,
+        phase1_ms=period_ms / 3,
+        phase2_ms=period_ms / 3,
+        phase3_ms=0,
+        step_size=StimStepSize.StimStepSize10uA,
+        amp_neg_mA=abs(mA),
+        amp_pos_mA=abs(mA),
+        pre_ampsettle_ms=0,
+        post_ampsettle_ms=period_ms / 3,
+        post_charge_recovery_ms=0,
+        post_pluse_ms=period_ms / 3,
+        trigger=TriggerEvent.Level,
+        trigger_pol=TriggerPolarity.High,
+        pulses=1,
+    )
+
+
+def send_pulses(
+    xdaq: XDAQ,
+    stream: int,
+    channel: int,
+    duration_ms: float,
+    pluse_current_mA: float,
+    pluse_frequency: float,
+):
+    # The software trigger id, 0~7, can be shared by multiple stim
     software_trigger_id = 0
 
     # The enable_stim function will return a function to disable the stim
@@ -59,7 +110,7 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, plus
         xdaq=xdaq,
         stream=stream,
         channel=channel,
-        # Trigger source, 24~31 is the software trigger 1~8
+        # Trigger source, 24~31 is the software trigger 0~7
         trigger_source=24 + software_trigger_id,
         **pluses(pluse_current_mA, pluse_frequency)
     )
@@ -70,15 +121,17 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, plus
     # Calculate the number of steps to run, the number of steps should be multiple of 128 to avoid alignment error
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
 
-    # Set the maximum number of steps to run
-    # this could be replaced by
-    # xdaq.readDataBlock(run_steps).to_samples(),
-    # But it will take longer time to run, since it will read data from FPGA
+    # Set the maximum number of steps to run and start running.
+    # Start running
     xdaq.setMaxTimeStep(run_steps)
     xdaq.setContinuousRunMode(False)
     xdaq.run()
     while xdaq.is_running():
         time.sleep(0.1)
+    # Stop running
+    # The code between Start running and Stop running can be replaced by
+    # xdaq.readDataBlock(run_steps).to_samples()
+    # But it will take slightly longer time to run, since it will read data from FPGA
 
     # Disable software trigger after the run
     xdaq.manual_trigger(software_trigger_id, False)
