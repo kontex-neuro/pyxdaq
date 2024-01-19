@@ -190,6 +190,10 @@ class SampleRate(Enum):
             if sr.value[2] == rate:
                 return sr
         raise ValueError('Invalid sample rate')
+    
+    @property
+    def rate(self):
+        return self.value[2]
 
 
 class HeadstageChipID(Enum):

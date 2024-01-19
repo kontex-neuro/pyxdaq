@@ -1127,22 +1127,19 @@ class XDAQ:
         self.runAndReadBuffer(samples=128, poll_interval=0.003)  # upload aux commands
         self.selectAuxCommandBank('all', 2, 2 if fastSettle else 1)
 
+    def manual_trigger(self, trigger: int, enable: bool):
+        if not self.rhs:
+            return
+        self.dev.SetWireInValue(RHS.WireInManualTriggers, int(enable) << trigger, 1 << trigger)
+
     def set_stim(
         self, stream: int, channel: int, polarity: StartPolarity, shape: StimShape, delay_ms: float,
         duration_phase1_ms: float, duration_phase2_ms: float, duration_phase3_ms: float,
         amp_phase1_mA: float, amp_phase2_mA: float, pulses: int, duration_pulse_ms: float,
-        post_ampsettle_ms: float, trigger: TriggerEvent, trigger_source: int,
-        trigger_pol: TriggerPolarity, step_size: StimStepSize, enable: bool
+        pre_ampsettle_ms: float, post_ampsettle_ms: float, trigger: TriggerEvent,
+        trigger_source: int, trigger_pol: TriggerPolarity, step_size: StimStepSize, enable: bool,
+        post_charge_recovery_ms: float
     ):
-        max_current = step_size.nA * 256
-        assert 0 <= amp_phase1_mA and 0 <= amp_phase2_mA, 'current must be positive'
-
-        if amp_phase1_mA * 1e6 > max_current or amp_phase2_mA * 1e6 > max_current:
-            raise Exception(f'current out of range, max {step_size.nA} * 256 = {max_current} nA')
-
-        if amp_phase1_mA * 1e6 < step_size.nA or amp_phase2_mA * 1e6 < step_size.nA:
-            print(f'WARNING: current is less than one step size ({step_size.nA} nA)')
-
         dt = 1 / self.sampleRate.value[2]
         self.programStimReg(
             stream, channel, StimRegister.Trigger,
@@ -1156,12 +1153,22 @@ class XDAQ:
         t2 = int(duration_phase2_ms * 1e-3 / dt) + t1
         t3 = int(duration_phase3_ms * 1e-3 / dt) + t2
         t4 = int(duration_pulse_ms * 1e-3 / dt) + t3
-        if post_ampsettle_ms > 0:
-            t_ampsettle_on = t3
-            t_ampsettle_off = int(post_ampsettle_ms * 1e-3 / dt) + t_ampsettle_on
+        if pre_ampsettle_ms > 0:
+            t_ampsettle_on = t1 - int(pre_ampsettle_ms * 1e-3 / dt)
         else:
-            t_ampsettle_on = t4
-            t_ampsettle_off = 0x0
+            t_ampsettle_on = t1
+        if post_ampsettle_ms > 0:
+            t_ampsettle_off = int(post_ampsettle_ms * 1e-3 / dt) + t3
+        else:
+            t_ampsettle_off = t3
+
+        if post_charge_recovery_ms > 0:
+            t_charge_recovery_on = t3
+            t_charge_recovery_off = int(post_charge_recovery_ms * 1e-3 / dt) + t_charge_recovery_on
+        else:
+            t_charge_recovery_on = 0xFFFF
+            t_charge_recovery_off = 0xFFFF
+
         self.programStimReg(stream, channel, StimRegister.EventAmpSettleOn, t_ampsettle_on)
         self.programStimReg(stream, channel, StimRegister.EventStartStim, t0)
         self.programStimReg(stream, channel, StimRegister.EventStimPhase2, t1)
@@ -1169,8 +1176,10 @@ class XDAQ:
         self.programStimReg(stream, channel, StimRegister.EventEndStim, t3)
         self.programStimReg(stream, channel, StimRegister.EventRepeatStim, t4)
         self.programStimReg(stream, channel, StimRegister.EventAmpSettleOff, t_ampsettle_off)
-        self.programStimReg(stream, channel, StimRegister.EventChargeRecovOn, t4)
-        self.programStimReg(stream, channel, StimRegister.EventChargeRecovOff, 0x0)
+        self.programStimReg(stream, channel, StimRegister.EventChargeRecovOn, t_charge_recovery_on)
+        self.programStimReg(
+            stream, channel, StimRegister.EventChargeRecovOff, t_charge_recovery_off
+        )
         self.programStimReg(stream, channel, StimRegister.EventAmpSettleOnRepeat, 0xFFFF)
         self.programStimReg(stream, channel, StimRegister.EventAmpSettleOffRepeat, 0xFFFF)
         self.programStimReg(stream, channel, StimRegister.EventEnd, t4)
@@ -1214,14 +1223,36 @@ class XDAQ:
     def measure_impedance(
         self,
         desired_test_frequency: float = 1000,
+        channels: List[int] = None,
         progress: bool = True
-    ):
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Measure impedance of the headstage
+
+        Parameters:
+        -----------
+        desired_test_frequency: float
+            The frequency to test
+        channels: List[int]
+            The channels to test, if None, test all channels.
+            Note that all datastreams will be tested in parallel.
+        progress: bool
+            Whether to show progress bar
+
+        Returns:
+        --------
+        magnitude: np.ndarray
+            The magnitude of the impedance in Ohm, shape (n_stream, n_channel)
+        phase: np.ndarray
+            The phase of the impedance in degree, shape (n_stream, n_channel)
+        """
         for i in range(8):
             self.enableExternalDigOut(i, False)
 
         for i in range(8):
             self.enableDac(i, False)
-        channels = 16 if self.rhs else 32
+        headstage_channels = 16 if self.rhs else 32
+        test_channels = channels if channels is not None else list(range(headstage_channels))
         sample_rate = self.sampleRate.value[2]
         test_frequency = float(sample_rate / np.round(sample_rate / desired_test_frequency))
 
@@ -1257,7 +1288,7 @@ class XDAQ:
         for zscale in tqdm(range(3), disable=not progress, desc='scale'):
             reg.controller.set('zcheckScale', zscale)
             all_data.append([])
-            for ch in tqdm(range(channels), disable=not progress, desc='channel'):
+            for ch in tqdm(test_channels, disable=not progress, desc='channel'):
                 reg.controller.set('zcheckSelect', ch)
                 if self.rhs:
                     cmd = reg.createCommandListRegisterConfig(False, False)
@@ -1274,13 +1305,9 @@ class XDAQ:
         # zscale, wave pin, signal, channel, stream
         all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)
         # zscale, wave pin, stream, channel, signal
-        n_zscale, n_wave_ch, n_stream, n_ch, _ = all_data.shape
+        n_zscale, n_test_ch, n_stream, _, _ = all_data.shape
         assert n_zscale == 3
-        assert n_wave_ch == n_ch
-        rr = np.moveaxis(
-            all_data[:, np.arange(all_data.shape[1]), :,
-                     np.arange(all_data.shape[1]), :], 0, 2
-        )
+        rr = np.moveaxis(all_data[:, np.arange(n_test_ch), :, test_channels, :], 0, 2)
 
         magnitude, phase = calculate_impedance(
             rr.reshape((3, -1, rr.shape[-1])),
@@ -1289,7 +1316,7 @@ class XDAQ:
             desired_test_frequency=desired_test_frequency
         )
 
-        return magnitude.reshape((n_stream, n_ch)), phase.reshape((n_stream, n_ch))
+        return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
 
 
 def get_XDAQ(
