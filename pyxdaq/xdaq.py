@@ -1135,7 +1135,7 @@ class XDAQ:
     def set_stim(
         self, stream: int, channel: int, polarity: StartPolarity, shape: StimShape, delay_ms: float,
         duration_phase1_ms: float, duration_phase2_ms: float, duration_phase3_ms: float,
-        amp_phase1_mA: float, amp_phase2_mA: float, pulses: int, duration_pulse_ms: float,
+        amp_neg_mA: float, amp_pos_mA: float, pulses: int, duration_pulse_ms: float,
         pre_ampsettle_ms: float, post_ampsettle_ms: float, trigger: TriggerEvent,
         trigger_source: int, trigger_pol: TriggerPolarity, step_size: StimStepSize, enable: bool,
         post_charge_recovery_ms: float
@@ -1187,8 +1187,8 @@ class XDAQ:
         reg = self.getreg(self.sampleRate)
         reg.setStimStepSize(step_size)
         cmd = reg.createCommandListSetStimMagnitudes(
-            magnitude_neg=int((amp_phase1_mA * 1e6) // step_size.nA),
-            magnitude_pos=int((amp_phase2_mA * 1e6) // step_size.nA),
+            magnitude_neg=int((amp_neg_mA * 1e6) // step_size.nA),
+            magnitude_pos=int((amp_pos_mA * 1e6) // step_size.nA),
             channel=channel
         )
         self.uploadCommandList(cmd, 0, 0)

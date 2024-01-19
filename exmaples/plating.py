@@ -35,8 +35,8 @@ def pluses(mA: float, frequency: float):
         # Use 10uA step size, the current will be truncated to the nearest 10uA
         step_size=StimStepSize.StimStepSize10uA,
         # Amplitude of the first phase
-        amp_phase1_mA=mA,
-        amp_phase2_mA=0,
+        amp_neg_mA=0 if mA > 0 else -mA,
+        amp_pos_mA=mA if mA > 0 else 0,
         # Please refer to Intan Manual for ampsettle and charge recovery
         pre_ampsettle_ms=0,
         post_ampsettle_ms=half_period_ms,
@@ -52,7 +52,7 @@ def pluses(mA: float, frequency: float):
 
 
 def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, pluse_frequency):
-    software_trigger_id = 1
+    software_trigger_id = 0
 
     # The enable_stim function will return a function to disable the stim
     disable_stim = enable_stim(
@@ -60,7 +60,7 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, plus
         stream=stream,
         channel=channel,
         # Trigger source, 24~31 is the software trigger 1~8
-        trigger_source=24 + software_trigger_id - 1,
+        trigger_source=24 + software_trigger_id,
         **pluses(pluse_current_mA, pluse_frequency)
     )
 
@@ -88,7 +88,6 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, plus
     return run_steps
 
 
-#%%
 target_stream = 0
 target_channel = 0
 for i in range(3):
@@ -103,6 +102,6 @@ for i in range(3):
         stream=target_stream,
         channel=target_channel,
         duration_ms=1000,
-        pluse_current_mA=1,
+        pluse_current_mA=2,
         pluse_frequency=50
     )

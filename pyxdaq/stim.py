@@ -10,8 +10,8 @@ def enable_stim(
     channel: int,
     # current settings
     step_size: StimStepSize,
-    amp_phase1_mA: float,
-    amp_phase2_mA: float,
+    amp_neg_mA: float,
+    amp_pos_mA: float,
     # trigger settings
     trigger: TriggerEvent,
     trigger_source: int,
@@ -31,23 +31,22 @@ def enable_stim(
     post_charge_recovery_ms: float,
 ):
     max_current = step_size.nA * 256
-    assert 0 <= amp_phase1_mA and 0 <= amp_phase2_mA, 'current must be positive'
+    assert 0 <= amp_neg_mA and 0 <= amp_pos_mA, 'current must be positive'
 
-    if amp_phase1_mA * 1e6 > max_current:
+    if amp_neg_mA * 1e6 > max_current:
         raise Exception(
-            f'phase 1 current out of range, max {step_size.nA} * 256 = {max_current} nA'
+            f'negative current out of range, max {step_size.nA} * 256 = {max_current} nA'
         )
 
-    if amp_phase1_mA * 1e6 < step_size.nA:
-        print(f'WARNING: phase 1 current is less than one step size ({step_size.nA} nA)')
+    if 0 < amp_neg_mA * 1e6 < step_size.nA:
+        print(f'WARNING: negative current is less than one step size ({step_size.nA} nA)')
 
-    if shape != StimShape.Monophasic:
-        if amp_phase2_mA * 1e6 > max_current:
-            raise Exception(
-                f'phase 2 current out of range, max {step_size.nA} * 256 = {max_current} nA'
-            )
-        if amp_phase2_mA * 1e6 < step_size.nA:
-            print(f'WARNING: phase 2 current is less than one step size ({step_size.nA} nA)')
+    if amp_pos_mA * 1e6 > max_current:
+        raise Exception(
+            f'positive current out of range, max {step_size.nA} * 256 = {max_current} nA'
+        )
+    if 0 < amp_pos_mA * 1e6 < step_size.nA:
+        print(f'WARNING: positive current is less than one step size ({step_size.nA} nA)')
 
     if shape == StimShape.Biphasic and phase2_ms == 0 or shape == StimShape.BiphasicWithInterphaseDelay:
         raise Exception('Biphasic shape requires duration_phase2_ms > 0')
@@ -85,8 +84,8 @@ def enable_stim(
         'duration_phase1_ms': phase1_ms,
         'duration_phase2_ms': phase2_ms,
         'duration_phase3_ms': phase3_ms,
-        'amp_phase1_mA': amp_phase1_mA,
-        'amp_phase2_mA': amp_phase2_mA,
+        'amp_neg_mA': amp_neg_mA,
+        'amp_pos_mA': amp_pos_mA,
         'pre_ampsettle_ms': pre_ampsettle_ms,
         'post_ampsettle_ms': post_ampsettle_ms,
         'pulses': pulses,
