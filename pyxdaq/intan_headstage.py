@@ -81,7 +81,7 @@ class IntanHeadstage:
 
     @classmethod
     def _get_dsp_freq_table(cls, sample_rate):
-        x = 2.0**np.arange(0, 16)
+        x = 2.0**np.arange(1, 16)
         return sample_rate * np.log(x / (x - 1.0)) / (np.pi * 2)
 
     @classmethod
@@ -89,16 +89,20 @@ class IntanHeadstage:
         f_cutoff = cls._get_dsp_freq_table(sample_rate)
         log_new_dsp_cutoff_freq = np.log10(new_dsp_cutoff_freq)
 
-        if new_dsp_cutoff_freq > f_cutoff[1]:
-            dsp_cutoff_freq = 1
-        elif new_dsp_cutoff_freq < f_cutoff[15]:
-            dsp_cutoff_freq = 15
+        if new_dsp_cutoff_freq > f_cutoff[0]:
+            dsp_cutoff_freq = 0
+        elif new_dsp_cutoff_freq < f_cutoff[14]:
+            dsp_cutoff_freq = 14
         else:
-            log_f_cutoff = np.log10(f_cutoff[1:])
+            log_f_cutoff = np.log10(f_cutoff)
             log_diff = np.abs(log_new_dsp_cutoff_freq - log_f_cutoff)
             dsp_cutoff_freq = np.argmin(log_diff) + 1
 
-        return dsp_cutoff_freq, f_cutoff[dsp_cutoff_freq]
+        return dsp_cutoff_freq, f_cutoff[dsp_cutoff_freq - 1]
+
+    def set_dsp_cutoff_freq(self, new_dsp_cutoff_freq):
+        v, _ = self._set_dsp_cutoff_freq(new_dsp_cutoff_freq, self.sample_rate.value[2])
+        self.controller.set('dspCutoffFreq', v)
 
     @classmethod
     def _upper_bw_reg(cls, upperBandwidth):

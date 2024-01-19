@@ -44,6 +44,14 @@
                 { "bits": 16, "type": "REGISTER", "name": "addr" }
             ]
         },
+        "writeuval": {
+            "opcode": 2,
+            "operands": [
+                { "bits": 6, "type": "IMMEDIATE", "value": "0b100000" },
+                { "bits": 8, "type": "ADDRESS", "name": "addr" },
+                { "bits": 16, "type": "VARIABLE", "name": "value" }
+            ]
+        },
         "writem": {
             "opcode": 2,
             "operands": [

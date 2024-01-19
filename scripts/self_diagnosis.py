@@ -1,29 +1,32 @@
-import os
 import gc
-from pathlib import Path
-import time
+import json
+import os
 import platform
 import shutil
-import json
+import time
+from pathlib import Path
 
 diagnostic_report = {
-    'OS':platform.system(),
-    'python':platform.python_version(),
+    'OS': platform.system(),
+    'python': platform.python_version(),
 }
+
 
 def main():
     print('Checking dependencies...', end='')
     try:
         from rich.console import Console
         from rich.table import Table
-        console = Console(height=shutil.get_terminal_size().lines - 1,highlight=False)
+        console = Console(height=shutil.get_terminal_size().lines - 1, highlight=False)
         import dataclass_wizard
-        import numpy 
+        import numpy
         diagnostic_report['dependencies'] = 'OK'
         console.print('[OK]', style='bold green')
     except ImportError as e:
         diagnostic_report['dependencies'] = str(e)
-        print('project is not installed! Please follow the instructions at README.md to install it.')
+        print(
+            'project is not installed! Please follow the instructions at README.md to install it.'
+        )
         return
 
     console.print('Checking pyxdaq...', end='')
@@ -50,7 +53,10 @@ def main():
     for f in file_to_check:
         if not Path(f).exists():
             diagnostic_report['project'] = f'{f} is missing!'
-            console.print(f'{f} is missing! Please make sure that you are running this script from the root directory of the project.', style='bold red')
+            console.print(
+                f'{f} is missing! Please make sure that you are running this script from the root directory of the project.',
+                style='bold red'
+            )
             return
     diagnostic_report['project'] = 'OK'
     console.print('[OK]', style='bold green')
@@ -62,13 +68,12 @@ def main():
             driver_url = 'https://pins.opalkelly.com/downloads'
             console.print(
                 'Opal Kelly FrontPanel API is not installed or not working properly.'
-                f'\nPlease make sure that the driver is installed from [link={driver_url}]Opal Kelly website[/link].'
-            ,style='bold red')
-        else:
-            console.print(
-                'Opal Kelly FrontPanel API is not working properly.', style='bold red'
+                f'\nPlease make sure that the driver is installed from [link={driver_url}]Opal Kelly website[/link].',
+                style='bold red'
             )
-        diagnostic_report['frontpanel'] = 'Not working properly' 
+        else:
+            console.print('Opal Kelly FrontPanel API is not working properly.', style='bold red')
+        diagnostic_report['frontpanel'] = 'Not working properly'
         return
     else:
         console.print('[OK]', style='bold green')
@@ -77,12 +82,15 @@ def main():
     console.print('\nDetecting XDAQ...')
     try:
         from pyxdaq.board import OkBoard
-        from pyxdaq.xdaq import XDAQModel,XDAQ
         from pyxdaq.constants import SampleRate
+        from pyxdaq.xdaq import XDAQ, XDAQModel
 
         def get_device():
             dev = ok.okCFrontPanel()
-            devices = [(dev.GetDeviceListModel(i), dev.GetDeviceListSerial(i)) for i in range(dev.GetDeviceCount())]
+            devices = [
+                (dev.GetDeviceListModel(i), dev.GetDeviceListSerial(i))
+                for i in range(dev.GetDeviceCount())
+            ]
             diagnostic_report['ok_devices'] = devices
             for md, sn in devices:
                 console.print(f'Found Opal Kelly Device: [bold]{md}[/bold] [bold]{sn}[/bold]')
@@ -111,7 +119,7 @@ def main():
             raise RuntimeError('No supported device found')
 
         xdaq = get_device()
-    
+
         diagnostic_report['xdaq_info'] = str(xdaq.xdaqinfo)
         diagnostic_report['xdaq'] = 'OK'
         console.print('[OK]', style='bold green')
@@ -132,11 +140,17 @@ def main():
         xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, False)
         xdaq.findConnectedAmplifiers()
 
-        tb = Table(show_header=True, header_style="bold magenta", title="XDAQ HDMI Ports (Recording X-Headstages)")
+        tb = Table(
+            show_header=True,
+            header_style="bold magenta",
+            title="XDAQ HDMI Ports (Recording X-Headstages)"
+        )
         rhd_ports = xdaq.xdaqinfo.rhd // 256 if xdaq.xdaqinfo.model == XDAQModel.One else xdaq.xdaqinfo.rhd // 128
         for n, port in enumerate(xdaq.ports):
             channels = sum(s.chip.num_channels_per_stream() for s in port)
-            tb.add_column(f"Port {n+1} [{channels}] Channels", justify="left", style="cyan", width=30)
+            tb.add_column(
+                f"Port {n+1} [{channels}] Channels", justify="left", style="cyan", width=30
+            )
         for row in list(zip(*xdaq.ports))[:8 if xdaq.xdaqinfo.model == XDAQModel.One else 4]:
             tb.add_row(*map(str, row[:rhd_ports]))
         diagnostic_report['xdaq_rhd'] = str(xdaq.ports)
@@ -148,7 +162,7 @@ def main():
         console.print('Unable to read XDAQ HDMI Ports.', style='bold red')
         return
 
-    console.print('\nDetecting Stim-Record X-Headstages ...', end='') 
+    console.print('\nDetecting Stim-Record X-Headstages ...', end='')
     try:
         xdaq.config_fpga(True, 'bitfiles/xsr7310a75.bit')
         diagnostic_report['fpga_rhs'] = '{:X}'.format(xdaq.xdaqinfo.fpga)
@@ -156,11 +170,17 @@ def main():
         xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
         xdaq.findConnectedAmplifiers()
 
-        tb = Table(show_header=True, header_style="bold magenta", title="XDAQ HDMI Ports (Stim-Record X-Headstages)")
+        tb = Table(
+            show_header=True,
+            header_style="bold magenta",
+            title="XDAQ HDMI Ports (Stim-Record X-Headstages)"
+        )
         rhs_ports = xdaq.xdaqinfo.rhs // 32
         for n, port in enumerate(xdaq.ports):
             channels = sum(s.chip.num_channels_per_stream() for s in port)
-            tb.add_column(f"Port {n+1} [{channels}] Channels", justify="left", style="cyan", width=30)
+            tb.add_column(
+                f"Port {n+1} [{channels}] Channels", justify="left", style="cyan", width=30
+            )
         for row in list(zip(*xdaq.ports))[:2 if xdaq.xdaqinfo.rhs >= 32 else 1]:
             tb.add_row(*map(str, row[:rhs_ports]))
         diagnostic_report['xdaq_rhs'] = str(xdaq.ports)

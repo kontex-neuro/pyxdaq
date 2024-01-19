@@ -10,12 +10,73 @@ import numpy as np
 from dataclass_wizard import JSONWizard
 
 from .board import Board, OkBoard
-from .constants import (
-    RHD, RHS, XDAQMCU, HeadstageChipID, HeadstageChipMISOID, SampleRate, XDAQWireOut
-)
-from .datablock import DataBlock
+from .constants import *
+from .datablock import DataBlock, amplifier2mv
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
+
+DEGREES_TO_RADIANS = math.pi / 180.0
+RADIANS_TO_DEGREES = 180.0 / math.pi
+TWO_PI = 2 * math.pi
+
+
+def amplitudeOfFreqComponent(data, startIndex, endIndex, sampleRate, frequency):
+    length = endIndex - startIndex + 1
+    k = 2.0 * math.pi * frequency / sampleRate  # precalculate for speed
+
+    # Perform correlation with sine and cosine waveforms.
+    meanI = 0.0
+    meanQ = 0.0
+    for t in range(startIndex, endIndex + 1):
+        meanI += data[t] * math.cos(k * t)
+        meanQ += data[t] * -1.0 * math.sin(k * t)
+    meanI /= length
+    meanQ /= length
+
+    return complex(2.0 * meanI, 2.0 * meanQ)
+
+
+def measureComplexAmplitude(
+    ampdata: np.ndarray, sampleRate: int, frequency: float, numPeriods: int
+):
+    period = int(sampleRate / frequency)
+    startIndex = 0
+    endIndex = startIndex + numPeriods * period - 1
+
+    # Move the measurement window to the end of the waveform to ignore start-up transient.
+    while endIndex < len(ampdata) - period:
+        startIndex += period
+        endIndex += period
+
+    # Measure real (iComponent) and imaginary (qComponent) amplitude of frequency component.
+    return amplitudeOfFreqComponent(ampdata, startIndex, endIndex, sampleRate, frequency)
+
+
+def factor_out_parallel_capacitance(
+    impedance_magnitude, impedance_phase, frequency, parasitic_capacitance
+):
+    # Convert from polar coordinates to rectangular coordinates.
+    measured_r = impedance_magnitude * np.cos(impedance_phase)
+    measured_x = impedance_magnitude * np.sin(impedance_phase)
+
+    cap_term = TWO_PI * frequency * parasitic_capacitance
+    x_term = cap_term * (measured_r * measured_r + measured_x * measured_x)
+    denominator = cap_term * x_term + 2 * cap_term * measured_x + 1
+    true_r = measured_r / denominator
+    true_x = (measured_x + x_term) / denominator
+
+    # Convert from rectangular coordinates back to polar coordinates.
+    impedance_magnitude = np.sqrt(true_r * true_r + true_x * true_x)
+    impedance_phase = RADIANS_TO_DEGREES * np.arctan2(true_x, true_r)
+
+    return impedance_magnitude, impedance_phase
+
+
+def approximateSaturationVoltage(actualZFreq, highCutoff):
+    if actualZFreq < 0.2 * highCutoff:
+        return 5000.0
+    else:
+        return 5000.0 * np.sqrt(1.0 / (1.0 + np.power(3.3333 * actualZFreq / highCutoff, 4.0)))
 
 
 class XDAQModel(Enum):
@@ -65,8 +126,6 @@ class XDAQInfo:
         daio = board.GetWireOutValue(XDAQWireOut.Daio, False)
         rhd, rhs, model = XDAQInfo._parse_hdmi(hdmi)
         model = XDAQModel(model)
-        if model == XDAQModel.Core:
-            rhd //= 2
         din, dout, ain, aout = XDAQInfo._parse_daio(daio)
         return cls(
             serial, hdmi, board.GetWireOutValue(XDAQWireOut.Fpga, False), daio,
@@ -242,6 +301,14 @@ class XDAQPorts(JSONWizard):
             yield self.streams[chip * streams_per_chip:(chip + 1) * streams_per_chip]
 
 
+def stim_trigger(source: int, event: TriggerEvent, polarity: TriggerPolarity, enabled: bool):
+    return source | event.value << 5 | polarity.value << 6 | enabled << 7
+
+
+def stim_params(pulses: int, shape: StimShape, start_polarity: StartPolarity):
+    return (pulses - 1) | shape.value << 8 | start_polarity.value << 10
+
+
 class XDAQ:
     dev: Board
     expander: bool = None
@@ -332,7 +399,10 @@ class XDAQ:
         return self.dev.GetWireOutValue(self.ep.WireOutNumWords)
 
     def flush(self):
-        raise NotImplementedError
+        self.dev.dev.SetWireInValue(0, 1 << 17)
+        self.dev.dev.UpdateWireIns()
+        self.dev.dev.SetWireInValue(0, 0 << 17)
+        self.dev.dev.UpdateWireIns()
 
     def selectAuxCommandBank(self, port: Union[int, str], auxCommandSlot, bank: int):
         """
@@ -636,6 +706,11 @@ class XDAQ:
             return
         self.dev.SetWireInValue(self.ep.WireInAuxEnable, 0xff, 0xff)
 
+    def enableAuxCommandsOnOneStream(self, stream):
+        if not self.rhs:
+            return
+        self.dev.SetWireInValue(self.ep.WireInAuxEnable, 1 << stream, 0xff)
+
     def setGlobalSettlePolicy(self, settle: List[bool], global_settle: bool):
         if not self.rhs:
             return
@@ -666,7 +741,7 @@ class XDAQ:
         value = max(0, min(65535, value))
         self.dev.SetWireInValue(self.ep.WireInAdcThreshold, value)
 
-    def programStimReg(self, stream: int, channel: int, reg: int, value: int):
+    def programStimReg(self, stream: int, channel: int, reg: StimRegister, value: int):
         # stream(0-7) * channel(0-15) = max 128
         # WireInStimRegAddr[3:0]: StimRegAddress
         # WireInStimRegAddr[7:4]: StimRegChannel 0-15 (channel on each RHS2116)
@@ -689,14 +764,68 @@ class XDAQ:
         # 12 EventAmpSettleOffRepeat
         # 13 EventEnd
         self.dev.SetWireInValue(
-            self.ep.WireInStimRegAddr, (stream << 8) | (channel << 4) | reg, update=False
+            self.ep.WireInStimRegAddr, (stream << 8) | (channel << 4) | reg.value, update=False
         )
         self.dev.SetWireInValue(self.ep.WireInStimRegWord, value)
         self.dev.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 1)
 
     def set_headstage_sequencer(self):
-        return
-        raise NotImplementedError
+        NEVER = 0xffff
+        for stream in range(8):
+            for channel in range(16):
+                self.programStimReg(
+                    stream, channel, StimRegister.Trigger,
+                    stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
+                )
+                self.programStimReg(
+                    stream, channel, StimRegister.Param,
+                    stim_params(1, StimShape.Biphasic, StartPolarity.cathodic)
+                )
+                self.programStimReg(stream, channel, StimRegister.EventAmpSettleOn, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventStartStim, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventStimPhase2, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventStimPhase3, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventEndStim, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventRepeatStim, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventAmpSettleOff, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventChargeRecovOn, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventChargeRecovOff, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventAmpSettleOnRepeat, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventAmpSettleOffRepeat, NEVER)
+                self.programStimReg(stream, channel, StimRegister.EventEnd, 65534)
+
+        for stream in range(8, 16):
+            self.programStimReg(
+                stream, 0, StimRegister.Trigger,
+                stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
+            )
+            self.programStimReg(
+                stream, 0, StimRegister.Param,
+                stim_params(1, StimShape.Monophasic, StartPolarity.cathodic)
+            )
+            self.programStimReg(stream, 0, StimRegister.EventStartStim, 0)
+            self.programStimReg(stream, 0, StimRegister.EventStimPhase2, NEVER)
+            self.programStimReg(stream, 0, StimRegister.EventStimPhase3, NEVER)
+            self.programStimReg(stream, 0, StimRegister.EventEndStim, 200)
+            self.programStimReg(stream, 0, StimRegister.EventRepeatStim, NEVER)
+            self.programStimReg(stream, 0, StimRegister.EventEnd, 240)
+            self.programStimReg(stream, 0, StimRegister.EventChargeRecovOn, 32768)
+            self.programStimReg(stream, 0, StimRegister.EventChargeRecovOff, 32768 + 3200)
+            self.programStimReg(stream, 0, StimRegister.EventAmpSettleOnRepeat, 32768 - 3200)
+
+        for channel in range(16):
+            self.programStimReg(
+                16, channel, StimRegister.Trigger,
+                stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
+            )
+            self.programStimReg(
+                16, channel, StimRegister.Param,
+                stim_params(3, StimShape.Biphasic, StartPolarity.cathodic)
+            )
+            self.programStimReg(16, channel, StimRegister.EventStartStim, NEVER)
+            self.programStimReg(16, channel, StimRegister.EventEndStim, NEVER)
+            self.programStimReg(16, channel, StimRegister.EventRepeatStim, NEVER)
+            self.programStimReg(16, channel, StimRegister.EventEnd, 65534)
 
     def initialize(self):
         self.reset_board()
@@ -728,9 +857,9 @@ class XDAQ:
 
         for i in range(8):
             self.setDacThreshold(i, 32768, True)
-
-        self.enableExternalFastSettle(False)
-        self.setExternalFastSettleChannel(0)
+        if not self.rhs:
+            self.enableExternalFastSettle(False)
+            self.setExternalFastSettleChannel(0)
         for i in range(8):
             self.enableExternalDigOut(i, False)
         for i in range(8):
@@ -739,8 +868,8 @@ class XDAQ:
         self.enableDacHighpassFilter(False)
 
         self.setAnalogInTriggerThreshold(1.65)
-        self.set_headstage_sequencer()
-
+        if self.rhs:
+            self.set_headstage_sequencer()
 
     def uploadCommandList(self, commandList: np.ndarray, auxCommandSlot, bank):
         if auxCommandSlot < 0 or auxCommandSlot > (2 + int(self.rhs)):
@@ -753,6 +882,7 @@ class XDAQ:
                 self.ep.PipeInAuxCmd1, self.ep.PipeInAuxCmd2, self.ep.PipeInAuxCmd3,
                 self.ep.PipeInAuxCmd4
             ][auxCommandSlot]
+            commandList = np.pad(commandList, (0, 16 - len(commandList) % 16), 'constant')
             self.dev.WriteToBlockPipeIn(ep, 16, bytearray(commandList.tobytes(order='C')))
         else:
             self.dev.SetWireInValue(self.ep.WireInCmdRamBank, bank)
@@ -782,14 +912,17 @@ class XDAQ:
             filterCoefficient = 65535
         self.dev.SendTrig(self.ep.TrigInConfig, 5, self.ep.WireInMultiUse, filterCoefficient)
 
-    def uploadCommands(self, fastSettle: bool = False, update_stim: bool = False):
+    def uploadCommands(
+        self,
+        fastSettle: bool = False,
+        stim_params: dict = {
+            'update_stim': False,
+            'readonly': True
+        }
+    ):
         reg = self.getreg(self.sampleRate)
 
-        if self.rhs:
-            cmd = reg.dummy(8192)
-            for aux in [1, 2, 3]:
-                self.uploadCommandList(cmd, aux, 0)
-        else:
+        if not self.rhs:
             cmd = reg.createCommandListUpdateDigOut()
             self.uploadCommandList(cmd, 0, 0)
             self.selectAuxCommandLength(0, 0, len(cmd) - 1)
@@ -810,10 +943,17 @@ class XDAQ:
             reg.set_lower_bandwidth(1)
 
         if self.rhs:
-            cmd = reg.createCommandListRegisterConfig(update_stim=update_stim, readonly=False)
+            cmd = reg.createCommandListRegisterConfig(**stim_params)
             self.uploadCommandList(cmd, 0, 0)
             self.selectAuxCommandLength(0, 0, len(cmd) - 1)
-            self.readDataBlocks()
+            cmd = reg.dummy(8192)
+            for aux in [1, 2, 3]:
+                self.uploadCommandList(cmd, aux, 0)
+            cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
+            self.uploadCommandList(cmd, 0, 0)
+            self.selectAuxCommandLength(0, 0, len(cmd) - 1)
+
+            self.runAndReadBuffer(samples=128)
         else:
             cmd = reg.createCommandListRegisterConfig(True)
             self.uploadCommandList(cmd, 2, 0)
@@ -835,10 +975,10 @@ class XDAQ:
         self, sampleRate: SampleRate, fastSettle: bool = False, update_stim: bool = False
     ):
         self.setSampleRate(sampleRate)
+        if not self.rhs:
+            self.setDacHighpassFilter(250, sampleRate.value[2])
 
-        self.setDacHighpassFilter(250, sampleRate.value[2])
-
-        self.uploadCommands(fastSettle, update_stim)
+        self.uploadCommands(fastSettle)
 
     @staticmethod
     def _encodeWaveform(waveform):
@@ -854,7 +994,7 @@ class XDAQ:
             self.ep.PipeInDAC5, self.ep.PipeInDAC6, self.ep.PipeInDAC7, self.ep.PipeInDAC8
         ][dacChannel]
 
-    def uploadDACData(self, waveform: np.array, dacChannel: int, length: int):
+    def uploadDACData(self, waveform: np.ndarray, dacChannel: int, length: int):
         buffer = bytearray(self._encodeWaveform(waveform))
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 2)
         result = self.dev.WriteToBlockPipeIn(self._getPipeInDACendpoint(dacChannel), 16, buffer)
@@ -926,17 +1066,30 @@ class XDAQ:
 
         return Context(self)
 
-    def readDataBlocks(self, n=1, poll_interval: float = 0.001) -> Tuple[int, bytearray]:
-        # Since our longest command sequence is 128 commands, we run the SPI interface for 128 samples.
-        self.setMaxTimeStep(128 * n)
+    def readBuffer(self, samples) -> Tuple[int, bytearray]:
+        bs = self.getSampleSizeBytes() * samples
+        buffer = bytearray(max(((bs + 1023) // 1024) * 1024, 1024))
+        return self.readDataToBuffer(buffer), buffer
+
+    def runAndReadBuffer(self, samples, poll_interval: float = 0.001) -> Tuple[int, bytearray]:
+        self.setMaxTimeStep(samples)
         self.setContinuousRunMode(False)
         self.run()
         while self.is_running() > 0:
-            time.sleep(poll_interval * n)
-        bs = self.getBlockSizeBytes() * n
-        buffer = bytearray(max(((bs + 1023) // 1024) * 1024, 1024))
-        r = self.readDataToBuffer(buffer)
-        return (r, buffer)
+            time.sleep(poll_interval * samples)
+        return self.readBuffer(samples)
+
+    def readDataBlock(self, samples) -> DataBlock:
+        n, buffer = self.readBuffer(samples)
+        return DataBlock.from_buffer(
+            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
+        )
+
+    def runAndReadDataBlock(self, samples, poll_interval: float = 0.001) -> DataBlock:
+        n, buffer = self.runAndReadBuffer(samples, poll_interval)
+        return DataBlock.from_buffer(
+            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
+        )
 
     def testCableDelay(self, output: str = ''):
         headstagename = np.array([ord(i) for i in ('INTAN' if self.rhs else 'INTANRHD')])
@@ -1032,8 +1185,178 @@ class XDAQ:
         # RHD: Select RAM Bank 0 for AuxCmd3 initially, so the ADC is calibrated.
         # RHS: use CLEAR command to calibrate ADC
         self.selectAuxCommandBank('all', 2, 0)
-        self.readDataBlocks(poll_interval=0.003)  # upload aux commands
+        self.runAndReadBuffer(samples=128, poll_interval=0.003)  # upload aux commands
         self.selectAuxCommandBank('all', 2, 2 if fastSettle else 1)
+
+    def set_stim(
+        self, stream: int, channel: int, polarity: StartPolarity, shape: StimShape, delay_ms: float,
+        duration_phase1_ms: float, duration_phase2_ms: float, duration_phase3_ms: float,
+        amp_phase1_mA: float, amp_phase2_mA: float, pulses: int, duration_pulse_ms: float,
+        post_ampsettle_ms: float, trigger: TriggerEvent, trigger_source: int,
+        trigger_pol: TriggerPolarity, step_size: StimStepSize, enable: bool
+    ):
+        max_current = step_size.nA * 256
+        assert 0 <= amp_phase1_mA and 0 <= amp_phase2_mA, 'current must be positive'
+
+        if amp_phase1_mA * 1e6 > max_current or amp_phase2_mA * 1e6 > max_current:
+            raise Exception(f'current out of range, max {step_size.nA} * 256 = {max_current} nA')
+
+        if amp_phase1_mA * 1e6 < step_size.nA or amp_phase2_mA * 1e6 < step_size.nA:
+            print(f'WARNING: current is less than one step size ({step_size.nA} nA)')
+
+        dt = 1 / self.sampleRate.value[2]
+        self.programStimReg(
+            stream, channel, StimRegister.Trigger,
+            stim_trigger(trigger_source, trigger, trigger_pol, enable)
+        )
+        self.programStimReg(
+            stream, channel, StimRegister.Param, stim_params(pulses, shape, polarity)
+        )
+        t0 = int(delay_ms * 1e-3 / dt)
+        t1 = int(duration_phase1_ms * 1e-3 / dt) + t0
+        t2 = int(duration_phase2_ms * 1e-3 / dt) + t1
+        t3 = int(duration_phase3_ms * 1e-3 / dt) + t2
+        t4 = int(duration_pulse_ms * 1e-3 / dt) + t3
+        if post_ampsettle_ms > 0:
+            t_ampsettle_on = t3
+            t_ampsettle_off = int(post_ampsettle_ms * 1e-3 / dt) + t_ampsettle_on
+        else:
+            t_ampsettle_on = t4
+            t_ampsettle_off = 0x0
+        self.programStimReg(stream, channel, StimRegister.EventAmpSettleOn, t_ampsettle_on)
+        self.programStimReg(stream, channel, StimRegister.EventStartStim, t0)
+        self.programStimReg(stream, channel, StimRegister.EventStimPhase2, t1)
+        self.programStimReg(stream, channel, StimRegister.EventStimPhase3, t2)
+        self.programStimReg(stream, channel, StimRegister.EventEndStim, t3)
+        self.programStimReg(stream, channel, StimRegister.EventRepeatStim, t4)
+        self.programStimReg(stream, channel, StimRegister.EventAmpSettleOff, t_ampsettle_off)
+        self.programStimReg(stream, channel, StimRegister.EventChargeRecovOn, t4)
+        self.programStimReg(stream, channel, StimRegister.EventChargeRecovOff, 0x0)
+        self.programStimReg(stream, channel, StimRegister.EventAmpSettleOnRepeat, 0xFFFF)
+        self.programStimReg(stream, channel, StimRegister.EventAmpSettleOffRepeat, 0xFFFF)
+        self.programStimReg(stream, channel, StimRegister.EventEnd, t4)
+        self.enableAuxCommandsOnOneStream(stream)
+        reg = self.getreg(self.sampleRate)
+        reg.setStimStepSize(step_size)
+        cmd = reg.createCommandListSetStimMagnitudes(
+            magnitude_neg=int((amp_phase1_mA * 1e6) // step_size.nA),
+            magnitude_pos=int((amp_phase2_mA * 1e6) // step_size.nA),
+            channel=channel
+        )
+        self.uploadCommandList(cmd, 0, 0)
+        self.selectAuxCommandLength(0, 0, len(cmd) - 1)
+
+        cmd = reg.dummy(8192)
+        for aux in [1, 2, 3]:
+            self.uploadCommandList(cmd, aux, 0)
+        self.setMaxTimeStep(128)
+        self.setContinuousRunMode(False)
+        self.setStimCmdMode(False)
+        self.enableAuxCommandsOnOneStream(stream)
+        self.run()
+        while self.is_running():
+            time.sleep(0.1)
+
+        reg.set_upper_bandwidth(7500)
+        reg.set_lower_bandwidth_a(1000)
+        reg.set_lower_bandwidth_b(1)
+
+        cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=True)
+        self.uploadCommandList(cmd, 0, 0)
+        self.selectAuxCommandLength(0, 0, len(cmd) - 1)
+        self.runAndReadBuffer(samples=128)
+
+        cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
+        self.uploadCommandList(cmd, 0, 0)
+        self.selectAuxCommandLength(0, 0, len(cmd) - 1)
+        self.enableAuxCommandsOnAllStreams()
+        self.setStimCmdMode(True)
+
+    def measure_impedance(self, desired_test_frequency: float = 1000, all_channels: bool = False):
+        for i in range(8):
+            self.enableExternalDigOut(i, False)
+
+        for i in range(8):
+            self.enableDac(i, False)
+        sample_rate = self.sampleRate.value[2]
+        test_frequency = float(sample_rate / np.round(sample_rate / desired_test_frequency))
+
+        reg = self.getreg(self.sampleRate)
+        cmd = reg.createCommandListZcheckDac(test_frequency, 128, 8192)
+        self.uploadCommandList(cmd, 0, 1)
+        self.selectAuxCommandLength(0, 0, len(cmd) - 1)
+        self.selectAuxCommandBank('all', 0, 1)
+
+        num_periods = int(0.02 * test_frequency)  # 20 ms
+        period = sample_rate / test_frequency
+        numBlocks = int(np.ceil((num_periods + 2) * period / 128))
+        reg.set_dsp_cutoff_freq(0.5)
+        if self.rhs:
+            reg.set_lower_bandwidth_b(1)
+        else:
+            reg.set_lower_bandwidth(1)
+        reg.set_upper_bandwidth(7500)
+        reg.controller.set('dspEnable', 1)
+        reg.controller.set('zcheckEn', 1)
+        if self.rhs:
+            cmd = reg.createCommandListRegisterConfig(False, False)
+        else:
+            cmd = reg.createCommandListRegisterConfig(False)
+        # self.uploadCommandList(cmd, 2, 3)
+        self.selectAuxCommandLength(2, 0, len(cmd) - 1)
+        self.selectAuxCommandBank('all', 2, 3)
+
+        self.setContinuousRunMode(False)
+        self.setMaxTimeStep(numBlocks * 128)
+
+        res = []
+        for zscale in range(3):
+            reg.controller.set('zcheckScale', zscale)
+            res.append([])
+            for ch in range(16 if self.rhs else 32):
+                reg.controller.set('zcheckSelect', ch)
+                if self.rhs:
+                    cmd = reg.createCommandListRegisterConfig(False, False)
+                else:
+                    cmd = reg.createCommandListRegisterConfig(False)
+                self.uploadCommandList(cmd, 2, 3)
+                sps = self.runAndReadDataBlock(numBlocks * 128).to_samples()
+                if self.rhs:
+                    data = sps.amp[:, :, :, 1]
+                else:
+                    data = sps.amp[:, :, :]
+                if not all_channels:
+                    data = sps.amp[:, ch, :]
+                res[-1].append(
+                    measureComplexAmplitude(
+                        amplifier2mv(data), sample_rate, test_frequency, num_periods
+                    )
+                )
+        res = np.array(res)
+
+        cap = np.array([0.1e-12, 1e-12, 10e-12])
+        dacVoltageAmplitude = 128 * (1.225 / 256)  # this assumes the DAC amplitude was set to 128
+        if self.rhs:
+            parasiticCapacitance = 12.0e-12
+        else:
+            parasiticCapacitance = 15.0e-12
+        relativeFreq = test_frequency / sample_rate
+        saturate_voltage = approximateSaturationVoltage(test_frequency, 7500)
+        # find the best cap for each channel by looking at largest cap that doesn't saturate
+        best = 2 - np.argmax(np.abs(res[::-1, :]) < saturate_voltage, axis=0)
+        saturated_cap3 = np.abs(res[1, :]) / np.abs(res[2, :]) > 0.2
+        best -= saturated_cap3 & (best == 2)
+        best_cap = cap[best]
+        best = np.choose(best, res)
+        current = np.pi * 2 * test_frequency * dacVoltageAmplitude * best_cap
+        magnitude = np.abs(best) / current * 1e-6 * (18 * relativeFreq * relativeFreq + 1)
+        phase = np.angle(best) + 3 / period
+        magnitude, phase = factor_out_parallel_capacitance(
+            magnitude, phase, test_frequency, parasiticCapacitance
+        )
+        if self.rhs:
+            magnitude = magnitude * 1.1
+        return magnitude, phase
 
 
 def get_XDAQ(
@@ -1049,13 +1372,14 @@ def get_XDAQ(
     xdaq.config_fpga(rhs, bitfile)
     xdaq.initialize()
 
+    # Set sample rate and upload all auxiliary SPI command sequences
     xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, fastSettle)
     if skip_headstage:
         return xdaq
 
     xdaq.findConnectedAmplifiers()
     xdaq.calibrateADC(fastSettle)
-    xdaq.changeSampleRate(SampleRate.SampleRate20000Hz, fastSettle)
+    # xdaq.changeSampleRate(SampleRate.SampleRate20000Hz, fastSettle)
     return xdaq
 
 

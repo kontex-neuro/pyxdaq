@@ -1,7 +1,7 @@
 [project]
 name = "pyxdaq"
 version = "0.0.1"
-dependencies = ["dataclass_wizard", "numpy", "rich", "tqdm"]
+dependencies = ["dataclass_wizard", "numpy", "rich", "tqdm", "matplotlib", "seaborn", "scipy"]
 
 [tool.setuptools.packages.find]
 include = ["pyxdaq", "pyxdaq.*"]

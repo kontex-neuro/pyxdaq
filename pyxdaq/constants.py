@@ -210,10 +210,12 @@ class HeadstageChipID(Enum):
             return 16
         else:
             return 0
+
     def num_channels_per_stream(self):
         if self == HeadstageChipID.RHD2164:
             return self.num_channels() // 2
         return self.num_channels()
+
 
 class HeadstageChipMISOID(Enum):
     NA = 0
@@ -221,9 +223,31 @@ class HeadstageChipMISOID(Enum):
     MISO_B = 58
 
 
+class TriggerEvent(Enum):
+    Level = 0
+    Edge = 1
+
+
+class TriggerPolarity(Enum):
+    Low = 0
+    High = 1
+
+
+class StimShape(Enum):
+    Biphasic = 0
+    BiphasicWithInterphaseDelay = 1
+    Triphasic = 2
+    Monophasic = 3
+
+
+class StartPolarity(Enum):
+    anodic = 0
+    cathodic = 1
+
+
 class StimRegister(Enum):
-    TriggerParams = 0
-    StimParams = 1
+    Trigger = 0
+    Param = 1
     EventAmpSettleOn = 2
     EventAmpSettleOff = 3
     EventStartStim = 4
@@ -236,13 +260,35 @@ class StimRegister(Enum):
     EventAmpSettleOnRepeat = 11
     EventAmpSettleOffRepeat = 12
     EventEnd = 13
-    DacBaseline = 9
-    DacPositive = 10
-    DacNegative = 11
 
 
-class StimShape(Enum):
-    Biphasic = 0
-    BiphasicWithInterphaseDelay = 1
-    Triphasic = 2
-    Monophasic = 3
+class StimStepSize(Enum):
+    StimStepSizeMin = 0
+    StimStepSize10nA = 1
+    StimStepSize20nA = 2
+    StimStepSize50nA = 3
+    StimStepSize100nA = 4
+    StimStepSize200nA = 5
+    StimStepSize500nA = 6
+    StimStepSize1uA = 7
+    StimStepSize2uA = 8
+    StimStepSize5uA = 9
+    StimStepSize10uA = 10
+    StimStepSizeMax = 11
+
+    @property
+    def nA(self):
+        return {
+            StimStepSize.StimStepSizeMin: float('nan'),
+            StimStepSize.StimStepSize10nA: 10,
+            StimStepSize.StimStepSize20nA: 20,
+            StimStepSize.StimStepSize50nA: 50,
+            StimStepSize.StimStepSize100nA: 100,
+            StimStepSize.StimStepSize200nA: 200,
+            StimStepSize.StimStepSize500nA: 500,
+            StimStepSize.StimStepSize1uA: 1000,
+            StimStepSize.StimStepSize2uA: 2000,
+            StimStepSize.StimStepSize5uA: 5000,
+            StimStepSize.StimStepSize10uA: 10000,
+            StimStepSize.StimStepSizeMax: float('nan')
+        }[self]

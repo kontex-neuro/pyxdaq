@@ -33,7 +33,7 @@ class DebugWrapper:
                 if isinstance(arg, int):
                     return hex(arg)
                 elif isinstance(arg, bytearray):
-                    return 'bytearray'
+                    return hex(len(arg))
                 else:
                     return arg
 

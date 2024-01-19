@@ -1,6 +1,8 @@
+from typing import Union
+
 import numpy as np
 
-from .constants import SampleRate
+from .constants import SampleRate, StimStepSize
 from .intan_headstage import IntanHeadstage
 
 
@@ -99,7 +101,10 @@ class RHSDriver(IntanHeadstage):
         cmd.extend(self.encode('read', addr=addr) for addr in [40, 42, 44, 46, 48, 50])
         cmd.extend(self.encode('read', addr=addr) for addr in range(64, 80))
         cmd.extend(self.encode('read', addr=addr) for addr in range(96, 112))
-        cmd.append(self.encode('clear'))
+        if readonly:
+            cmd.append(self.encode('dummy'))
+        else:
+            cmd.append(self.encode('clear'))
         cmd.extend([self.encode('dummy')] * 10)
         return cmd
 
@@ -110,3 +115,43 @@ class RHSDriver(IntanHeadstage):
     @_pack_instructions
     def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
         return self.get_zcheck_cmds(frequency, amplitude, 3, maxlength)
+
+    @_pack_instructions
+    def createCommandListSetStimMagnitudes(
+        self, magnitude_neg: Union[int, np.ndarray], magnitude_pos: Union[int, np.ndarray],
+        channel: int
+    ):
+        cmd = [self.encode('dummy')] * 2
+        if channel is None:
+            pass
+        else:
+            self.controller.set(f'negativeCurrentTrim{channel}', 0x80)
+            self.controller.set(f'positiveCurrentTrim{channel}', 0x80)
+            self.controller.set(f'negativeCurrentMagnitude{channel}', magnitude_neg)
+            self.controller.set(f'positiveCurrentMagnitude{channel}', magnitude_pos)
+            cmd.append(self.encode('writeu', addr=96 + channel))
+            cmd.append(self.encode('writeu', addr=64 + channel))
+
+        cmd.extend([self.encode('dummy')] * (128 - len(cmd)))
+        return cmd
+
+    def setStimStepSize(self, step_size: StimStepSize):
+        s1, s2, s3, p, n = {
+            StimStepSize.StimStepSizeMin: (127, 63, 3, 6, 6),
+            StimStepSize.StimStepSize10nA: (64, 19, 3, 6, 6),
+            StimStepSize.StimStepSize20nA: (40, 40, 1, 7, 7),
+            StimStepSize.StimStepSize50nA: (64, 40, 0, 7, 7),
+            StimStepSize.StimStepSize100nA: (30, 20, 0, 7, 7),
+            StimStepSize.StimStepSize200nA: (25, 10, 0, 8, 8),
+            StimStepSize.StimStepSize500nA: (101, 3, 0, 9, 9),
+            StimStepSize.StimStepSize1uA: (98, 1, 0, 10, 10),
+            StimStepSize.StimStepSize2uA: (94, 0, 0, 11, 11),
+            StimStepSize.StimStepSize5uA: (38, 0, 0, 14, 14),
+            StimStepSize.StimStepSize10uA: (15, 0, 0, 15, 15),
+            StimStepSize.StimStepSizeMax: (0, 0, 0, 15, 15)
+        }[step_size]
+        self.controller.set('stepSel1', s1)
+        self.controller.set('stepSel2', s2)
+        self.controller.set('stepSel3', s3)
+        self.controller.set('stimPbias', p)
+        self.controller.set('stimNbias', n)

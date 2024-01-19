@@ -55,12 +55,12 @@ class Sample:
                 buffer[idx:], dtype=_uint16le, count=1 * datastreams * 2
             ).reshape((1, datastreams, 2))
             aux = np.concatenate((aux0, aux), axis=0)
-            idx += 1 * datastreams * 2
+            idx += 1 * datastreams * 2 * 2
 
             stim = np.frombuffer(
                 buffer[idx:], dtype=_uint16le, count=4 * datastreams
             ).reshape(4, datastreams)
-            idx += 4 * datastreams
+            idx += 4 * datastreams * 2
 
             dac = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
             idx += 16

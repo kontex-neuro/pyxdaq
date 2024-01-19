@@ -1,5 +1,5 @@
-import platform
 import os
+import platform
 from pathlib import Path
 
 if platform.system() == 'Darwin':
