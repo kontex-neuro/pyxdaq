@@ -5,6 +5,7 @@ from enum import Enum
 from functools import partial
 from pathlib import Path
 from typing import List, Tuple, Union
+from tqdm.auto import tqdm
 
 import numpy as np
 from dataclass_wizard import JSONWizard
@@ -14,69 +15,7 @@ from .constants import *
 from .datablock import DataBlock, amplifier2mv
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
-
-DEGREES_TO_RADIANS = math.pi / 180.0
-RADIANS_TO_DEGREES = 180.0 / math.pi
-TWO_PI = 2 * math.pi
-
-
-def amplitudeOfFreqComponent(data, startIndex, endIndex, sampleRate, frequency):
-    length = endIndex - startIndex + 1
-    k = 2.0 * math.pi * frequency / sampleRate  # precalculate for speed
-
-    # Perform correlation with sine and cosine waveforms.
-    meanI = 0.0
-    meanQ = 0.0
-    for t in range(startIndex, endIndex + 1):
-        meanI += data[t] * math.cos(k * t)
-        meanQ += data[t] * -1.0 * math.sin(k * t)
-    meanI /= length
-    meanQ /= length
-
-    return complex(2.0 * meanI, 2.0 * meanQ)
-
-
-def measureComplexAmplitude(
-    ampdata: np.ndarray, sampleRate: int, frequency: float, numPeriods: int
-):
-    period = int(sampleRate / frequency)
-    startIndex = 0
-    endIndex = startIndex + numPeriods * period - 1
-
-    # Move the measurement window to the end of the waveform to ignore start-up transient.
-    while endIndex < len(ampdata) - period:
-        startIndex += period
-        endIndex += period
-
-    # Measure real (iComponent) and imaginary (qComponent) amplitude of frequency component.
-    return amplitudeOfFreqComponent(ampdata, startIndex, endIndex, sampleRate, frequency)
-
-
-def factor_out_parallel_capacitance(
-    impedance_magnitude, impedance_phase, frequency, parasitic_capacitance
-):
-    # Convert from polar coordinates to rectangular coordinates.
-    measured_r = impedance_magnitude * np.cos(impedance_phase)
-    measured_x = impedance_magnitude * np.sin(impedance_phase)
-
-    cap_term = TWO_PI * frequency * parasitic_capacitance
-    x_term = cap_term * (measured_r * measured_r + measured_x * measured_x)
-    denominator = cap_term * x_term + 2 * cap_term * measured_x + 1
-    true_r = measured_r / denominator
-    true_x = (measured_x + x_term) / denominator
-
-    # Convert from rectangular coordinates back to polar coordinates.
-    impedance_magnitude = np.sqrt(true_r * true_r + true_x * true_x)
-    impedance_phase = RADIANS_TO_DEGREES * np.arctan2(true_x, true_r)
-
-    return impedance_magnitude, impedance_phase
-
-
-def approximateSaturationVoltage(actualZFreq, highCutoff):
-    if actualZFreq < 0.2 * highCutoff:
-        return 5000.0
-    else:
-        return 5000.0 * np.sqrt(1.0 / (1.0 + np.power(3.3333 * actualZFreq / highCutoff, 4.0)))
+from .impedance import calculate_impedance
 
 
 class XDAQModel(Enum):
@@ -1272,12 +1211,17 @@ class XDAQ:
         self.enableAuxCommandsOnAllStreams()
         self.setStimCmdMode(True)
 
-    def measure_impedance(self, desired_test_frequency: float = 1000, all_channels: bool = False):
+    def measure_impedance(
+        self,
+        desired_test_frequency: float = 1000,
+        progress: bool = True
+    ):
         for i in range(8):
             self.enableExternalDigOut(i, False)
 
         for i in range(8):
             self.enableDac(i, False)
+        channels = 16 if self.rhs else 32
         sample_rate = self.sampleRate.value[2]
         test_frequency = float(sample_rate / np.round(sample_rate / desired_test_frequency))
 
@@ -1309,11 +1253,11 @@ class XDAQ:
         self.setContinuousRunMode(False)
         self.setMaxTimeStep(numBlocks * 128)
 
-        res = []
-        for zscale in range(3):
+        all_data = []
+        for zscale in tqdm(range(3), disable=not progress, desc='scale'):
             reg.controller.set('zcheckScale', zscale)
-            res.append([])
-            for ch in range(16 if self.rhs else 32):
+            all_data.append([])
+            for ch in tqdm(range(channels), disable=not progress, desc='channel'):
                 reg.controller.set('zcheckSelect', ch)
                 if self.rhs:
                     cmd = reg.createCommandListRegisterConfig(False, False)
@@ -1325,38 +1269,27 @@ class XDAQ:
                     data = sps.amp[:, :, :, 1]
                 else:
                     data = sps.amp[:, :, :]
-                if not all_channels:
-                    data = sps.amp[:, ch, :]
-                res[-1].append(
-                    measureComplexAmplitude(
-                        amplifier2mv(data), sample_rate, test_frequency, num_periods
-                    )
-                )
-        res = np.array(res)
-
-        cap = np.array([0.1e-12, 1e-12, 10e-12])
-        dacVoltageAmplitude = 128 * (1.225 / 256)  # this assumes the DAC amplitude was set to 128
-        if self.rhs:
-            parasiticCapacitance = 12.0e-12
-        else:
-            parasiticCapacitance = 15.0e-12
-        relativeFreq = test_frequency / sample_rate
-        saturate_voltage = approximateSaturationVoltage(test_frequency, 7500)
-        # find the best cap for each channel by looking at largest cap that doesn't saturate
-        best = 2 - np.argmax(np.abs(res[::-1, :]) < saturate_voltage, axis=0)
-        saturated_cap3 = np.abs(res[1, :]) / np.abs(res[2, :]) > 0.2
-        best -= saturated_cap3 & (best == 2)
-        best_cap = cap[best]
-        best = np.choose(best, res)
-        current = np.pi * 2 * test_frequency * dacVoltageAmplitude * best_cap
-        magnitude = np.abs(best) / current * 1e-6 * (18 * relativeFreq * relativeFreq + 1)
-        phase = np.angle(best) + 3 / period
-        magnitude, phase = factor_out_parallel_capacitance(
-            magnitude, phase, test_frequency, parasiticCapacitance
+                all_data[-1].append(data)
+        #      0         1       2        3       4
+        # zscale, wave pin, signal, channel, stream
+        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)
+        # zscale, wave pin, stream, channel, signal
+        n_zscale, n_wave_ch, n_stream, n_ch, _ = all_data.shape
+        assert n_zscale == 3
+        assert n_wave_ch == n_ch
+        rr = np.moveaxis(
+            all_data[:, np.arange(all_data.shape[1]), :,
+                     np.arange(all_data.shape[1]), :], 0, 2
         )
-        if self.rhs:
-            magnitude = magnitude * 1.1
-        return magnitude, phase
+
+        magnitude, phase = calculate_impedance(
+            rr.reshape((3, -1, rr.shape[-1])),
+            sample_rate,
+            rhs=self.rhs,
+            desired_test_frequency=desired_test_frequency
+        )
+
+        return magnitude.reshape((n_stream, n_ch)), phase.reshape((n_stream, n_ch))
 
 
 def get_XDAQ(
