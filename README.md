@@ -3,7 +3,7 @@
 ## Installation
 ### Prerequisites
 * [Git](https://git-scm.com/)
-* [Python](https://www.python.org/downloads/) 3.8 or higher
+* [Python](https://www.python.org/downloads/) 3.9 or higher
 
 ### macOS
 ```shell
@@ -20,7 +20,7 @@ python3 -m pip install .
 ```powershell
 git clone https://github.com/kontex-neuro/pyxdaq.git
 cd pyxdaq
-python --version # check that Python 3.8 or higher is installed
+python --version # check that Python 3.9 or higher is installed
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -U pip
