@@ -1,14 +1,15 @@
 import numpy as np
+from dataclasses import dataclass
 import math
 from pyxdaq.datablock import amplifier2mv
+from typing import Union
+import logging
 
-DEGREES_TO_RADIANS = math.pi / 180.0
-RADIANS_TO_DEGREES = 180.0 / math.pi
-TWO_PI = 2 * math.pi
+logger = logging.getLogger(__name__)
 
 
-def amplitudeOfFreqComponent(data, startIndex, endIndex, sampleRate, frequency):
-    data_segment = np.array(data[startIndex:endIndex + 1])
+def amplitudeOfFreqComponent(data, sampleRate, frequency):
+    data_segment = np.array(data)
     fft_result = np.fft.rfft(data_segment, norm='forward')
     freqs = np.fft.fftfreq(len(data_segment), d=1 / sampleRate)
 
@@ -18,24 +19,11 @@ def amplitudeOfFreqComponent(data, startIndex, endIndex, sampleRate, frequency):
     return fft_result[target_index] * 2
 
 
-def measureComplexAmplitude(
-    ampdata: np.ndarray, sampleRate: int, frequency: float, numPeriods: int
-) -> np.ndarray:
+def measureComplexAmplitude(ampdata: np.ndarray, sampleRate: int, frequency: float) -> np.ndarray:
     if len(ampdata.shape) != 2:
         raise ValueError("ampdata must be in the shape (num_tests, signals)")
-    period = int(sampleRate / frequency)
-    startIndex = 0
-    endIndex = startIndex + numPeriods * period - 1
-
-    # Move the measurement window to the end of the waveform to ignore start-up transient.
-    while endIndex < len(ampdata) - period:
-        startIndex += period
-        endIndex += period
-
     # Measure real (iComponent) and imaginary (qComponent) amplitude of frequency component.
-    return np.array(
-        [amplitudeOfFreqComponent(i, startIndex, endIndex, sampleRate, frequency) for i in ampdata]
-    )
+    return np.array([amplitudeOfFreqComponent(i, sampleRate, frequency) for i in ampdata])
 
 
 def factor_out_parallel_capacitance(
@@ -45,7 +33,7 @@ def factor_out_parallel_capacitance(
     measured_r = impedance_magnitude * np.cos(impedance_phase)
     measured_x = impedance_magnitude * np.sin(impedance_phase)
 
-    cap_term = TWO_PI * frequency * parasitic_capacitance
+    cap_term = 2 * math.pi * frequency * parasitic_capacitance
     x_term = cap_term * (measured_r * measured_r + measured_x * measured_x)
     denominator = cap_term * x_term + 2 * cap_term * measured_x + 1
     true_r = measured_r / denominator
@@ -53,7 +41,7 @@ def factor_out_parallel_capacitance(
 
     # Convert from rectangular coordinates back to polar coordinates.
     impedance_magnitude = np.sqrt(true_r * true_r + true_x * true_x)
-    impedance_phase = RADIANS_TO_DEGREES * np.arctan2(true_x, true_r)
+    impedance_phase = np.rad2deg(np.arctan2(true_x, true_r))
 
     return impedance_magnitude, impedance_phase
 
@@ -69,7 +57,8 @@ def calculate_impedance(
     all_signals: np.ndarray,
     sample_rate: float,
     rhs: bool,
-    desired_test_frequency: float = 1000,
+    test_frequency: float,
+    return_cap: bool = False,
 ):
     if len(all_signals.shape) != 3:
         raise ValueError("all_signals must be in the shape (3, tests, signal_length)")
@@ -77,36 +66,135 @@ def calculate_impedance(
     if caps != 3:
         raise ValueError("all_signals must be in the shape (3, tests, signals_length)")
 
-    test_frequency = float(sample_rate / np.round(sample_rate / desired_test_frequency))
-
-    num_periods = int(0.02 * test_frequency)  # 20 ms
-    period = sample_rate / test_frequency
     res = measureComplexAmplitude(
         amplifier2mv(
             all_signals.reshape((-1, signal_length)),
-        ), sample_rate, test_frequency, num_periods
+        ), sample_rate, test_frequency
     ).reshape((caps, tests))
 
     cap = np.array([0.1e-12, 1e-12, 10e-12])
     dacVoltageAmplitude = 128 * (1.225 / 256)  # this assumes the DAC amplitude was set to 128
+    relativeFreq = test_frequency / sample_rate
+    saturate_voltage = approximateSaturationVoltage(test_frequency, 7500)
+    # find the best cap for each channel by looking at largest cap that doesn't saturate
+    best_idx = 2 - np.argmax(np.abs(res[::-1, :]) < saturate_voltage, axis=0)
+    saturated_cap3 = np.abs(res[1, :]) / np.abs(res[2, :]) > 0.2
+    best_idx -= saturated_cap3 & (best_idx == 2)  # if cap 3 is saturated, use cap 2
+    best_cap = cap[best_idx]
+    best = np.choose(best_idx, res)
+    current = 2 * np.pi * test_frequency * best_cap * dacVoltageAmplitude
+    magnitude = np.abs(best) / current * 1e-6 * (18 * relativeFreq * relativeFreq + 1)
+
     if rhs:
         parasiticCapacitance = 12.0e-12
     else:
         parasiticCapacitance = 15.0e-12
-    relativeFreq = test_frequency / sample_rate
-    saturate_voltage = approximateSaturationVoltage(test_frequency, 7500)
-    # find the best cap for each channel by looking at largest cap that doesn't saturate
-    best = 2 - np.argmax(np.abs(res[::-1, :]) < saturate_voltage, axis=0)
-    saturated_cap3 = np.abs(res[1, :]) / np.abs(res[2, :]) > 0.2
-    best -= saturated_cap3 & (best == 2)
-    best_cap = cap[best]
-    best = np.choose(best, res)
-    current = np.pi * 2 * test_frequency * dacVoltageAmplitude * best_cap
-    magnitude = np.abs(best) / current * 1e-6 * (18 * relativeFreq * relativeFreq + 1)
-    phase = np.angle(best) + 3 / period
     magnitude, phase = factor_out_parallel_capacitance(
-        magnitude, phase, test_frequency, parasiticCapacitance
+        magnitude, np.angle(best), test_frequency, parasiticCapacitance
     )
+
     if rhs:
         magnitude = magnitude * 1.1
-    return magnitude, phase
+
+    if return_cap:
+        return magnitude, phase, best_idx
+    else:
+        return magnitude, phase
+
+
+@dataclass
+class TestFrequency:
+    """
+    Not every frequency is achievable with the current sample rate. This class helps to find the 
+    actual frequency that will be used for testing and the actual period of the testing sine wave.
+    """
+    target: Union[float, np.ndarray]
+
+    def __post_init__(self):
+        if np.any(self.target < 1):
+            raise ValueError("Frequency must be greater than 1Hz")
+
+    def get_actual(self, sample_rate: float, display_warning: bool = True) -> float:
+        actual = sample_rate / np.round(sample_rate / self.target)
+        if np.any(abs(actual - self.target) / self.target > 0.05) and display_warning:
+            logger.warning(
+                f"Actual testing frequency {actual:.1f}Hz is off by more than 5% from target {self.target:.1f}Hz"
+            )
+        return actual
+
+    def get_period(self, sample_rate: float) -> Union[int, np.ndarray]:
+        if isinstance(self.target, float):
+            return int(np.round(sample_rate / self.target))
+        else:
+            return np.round(sample_rate / self.target).astype(int)
+
+
+@dataclass
+class MeasurementStrategy:
+    """
+    Helper class to compute the number of periods per measurement based on 
+    the desired test frequency and the minimum duration of the measurement.
+
+    This class is not meant to be instantiated directly, use the class methods
+    to create an instance.
+    Examples:
+        MeasurementStrategy.auto()
+        MeasurementStrategy.from_periods(10)
+    """
+    _periods: int = None
+    _duration: float = None
+
+    _min_periods: int = 5 # less than 5 periods is not enough for accurate measurement
+    _min_duration: float = None
+
+    _max_duration: float = 1
+
+    def __post_init__(self):
+        if (self._periods or self._duration or self._min_periods or self._min_duration) is None:
+            raise ValueError('At least one parameter must be set')
+        if self._periods is not None and self._duration is not None:
+            raise ValueError('Only one of periods or duration can be set')
+
+    @classmethod
+    def auto(cls):
+        """
+        Default strategy, 5 periods or 0.02 seconds, whichever is greater.
+        For a 1000Hz test frequency, 0.02 seconds will be used because 5 periods is only 0.005 sec.
+        """
+        return cls(_min_periods=5, _min_duration=0.02)
+
+    @classmethod
+    def from_periods(cls, periods: int):
+        return cls(_periods=periods)
+
+    @classmethod
+    def from_duration(cls, duration_in_second: float):
+        return cls(_duration=duration_in_second)
+
+    def get_num_periods(self, test_frequency: float) -> int:
+        min_periods_from_min_duration = 0
+        if self._min_duration is not None:
+            min_periods_from_min_duration = math.ceil(self._min_duration * test_frequency)
+        min_periods_from_both = 0
+        if self._min_periods is not None:
+            min_periods_from_both = max(self._min_periods, min_periods_from_min_duration)
+
+        if self._periods is not None:
+            periods = max(self._periods, min_periods_from_both)
+        elif self._duration is not None:
+            periods_from_duration = math.ceil(self._duration * test_frequency)
+            if periods_from_duration < min_periods_from_both:
+                raise ValueError(
+                    f'Number of periods from duration ({periods_from_duration}) '
+                    f'is less than the minimum number of periods ({min_periods_from_both})'
+                )
+            periods = periods_from_duration
+        else:
+            periods = min_periods_from_both
+
+        if periods / test_frequency > self._max_duration:
+            raise ValueError(
+                f'Measurement duration for {periods} periods at {test_frequency} Hz '
+                f'is greater than the maximum duration ({self._max_duration:.2f} seconds)'
+            )
+        return periods

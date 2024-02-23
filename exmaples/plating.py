@@ -3,6 +3,7 @@ import time
 from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
+from pyxdaq.impedance import TestFrequency
 
 xdaq = get_XDAQ(rhs=True)
 
@@ -147,7 +148,7 @@ target_channel = 0
 for i in range(3):
     print(f'Run {i+1}: Checking impedance at 1000 Hz')
     magnitude1000, phase1000 = xdaq.measure_impedance(
-        desired_test_frequency=1000, channels=[target_channel], progress=False
+        test_frequency=TestFrequency(1000), channels=[target_channel], progress=False
     )
     print(f'Impedance at 1000 Hz: {magnitude1000[target_stream,0]:.2f} Ohm')
     print(f'Sending 50Hz 1mA pluses for 1 second (dutycycle 50%)')

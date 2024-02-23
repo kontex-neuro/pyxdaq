@@ -204,15 +204,17 @@ class IntanHeadstage:
             raise ValueError("Amplitude out of range.")
         if frequency < 0.0:
             raise ValueError("Negative frequency not allowed.")
-        elif frequency > self.sample_rate.value[2] / 4.0:
-            raise ValueError("Frequency too high relative to sampling rate.")
+        elif frequency > self.sample_rate.rate / 4.0:
+            raise ValueError(
+                f"Frequency too high relative to sampling rate. {frequency:.2f} > Max: {self.sample_rate.rate / 4.0}"
+            )
 
         if frequency == 0.0:
             return [
                 self.encode('writeval', addr=register, value=int(math.floor(amplitude)))
             ] * maxlength
         else:
-            period = round(self.sample_rate.value[2] / frequency)
+            period = round(self.sample_rate.rate / frequency)
             if period > maxlength:
                 raise ValueError("Frequency too low relative to sampling rate.")
 
