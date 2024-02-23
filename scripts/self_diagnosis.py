@@ -41,26 +41,6 @@ def main():
         )
         return
 
-    console.print('Check project configuration...', end='')
-    file_to_check = [
-        'config/isa_rhd.json',
-        'config/isa_rhs.json',
-        'config/reg_rhd.json',
-        'config/reg_rhs.json',
-        'bitfiles/xr7310a75.bit',
-        'bitfiles/xsr7310a75.bit',
-    ]
-    for f in file_to_check:
-        if not Path(f).exists():
-            diagnostic_report['project'] = f'{f} is missing!'
-            console.print(
-                f'{f} is missing! Please make sure that you are running this script from the root directory of the project.',
-                style='bold red'
-            )
-            return
-    diagnostic_report['project'] = 'OK'
-    console.print('[OK]', style='bold green')
-
     from pyxdaq import ok
     console.print('Checking Opal Kelly FrontPanel API...', end='')
     if hasattr(ok, 'is_mock'):
@@ -103,7 +83,7 @@ def main():
                     board = OkBoard(dev=dev)
                     try:
                         xdaq = XDAQ('config', dev=board)
-                        xdaq.config_fpga(False, 'bitfiles/xr7310a75.bit')
+                        xdaq.config_fpga(rhs=False)
                         return xdaq
                     except RuntimeError as e:
                         if e.args[0] == 'XDAQ MCU did not start in time':
@@ -164,7 +144,7 @@ def main():
 
     console.print('\nDetecting Stim-Record X-Headstages ...', end='')
     try:
-        xdaq.config_fpga(True, 'bitfiles/xsr7310a75.bit')
+        xdaq.config_fpga(rhs=True)
         diagnostic_report['fpga_rhs'] = '{:X}'.format(xdaq.xdaqinfo.fpga)
         xdaq.initialize()
         xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)

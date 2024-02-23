@@ -6,7 +6,7 @@ from pyxdaq.datablock import DataBlock, adc2v
 from pyxdaq.constants import *
 import numpy as np
 
-xdaq = get_XDAQ(rhs=True, bitfile='bitfiles/xsr7310a75.bit')
+xdaq = get_XDAQ(rhs=True)
 
 print(xdaq.ports)
 
@@ -88,7 +88,6 @@ def plot_stim(sps: DataBlock, target_channel: int, target_stream: int):
     ax.set_yticks([-1, 0, 1])
     fig.tight_layout()
     plt.show()
-
 
 
 target_stream = 0

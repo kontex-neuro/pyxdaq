@@ -4,7 +4,7 @@ from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
 
-xdaq = get_XDAQ(rhs=True, bitfile='bitfiles/xsr7310a75.bit')
+xdaq = get_XDAQ(rhs=True)
 
 print(xdaq.ports)
 # XDAQ supports up to 4 X3SR32 Headstages, each headstage has 2 streams and each stream has 16 channels
@@ -55,6 +55,7 @@ def pluses(mA: float, frequency: float):
         # Since we are using Level trigger, sending one pluse each time
         pulses=1,
     )
+
 
 # Swap out the pluses function with this one to send biphasic pluses
 def biphasic_pluses(mA: float, frequency: float):

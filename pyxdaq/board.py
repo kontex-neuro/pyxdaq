@@ -101,10 +101,10 @@ class OkBoard(Board):
                 return dev
         raise RuntimeError('No supported device found')
 
-    def config_fpga(self, bitfile: str = 'bitfiles/xr7310a75.bit') -> Tuple[int, int]:
+    def config_fpga(self, bitfile: Union[str, Path]) -> Tuple[int, int]:
         if not Path(bitfile).exists():
             raise FileNotFoundError(f'bitfile {bitfile} not found')
-        error_code = self.dev.ConfigureFPGA(bitfile)
+        error_code = self.dev.ConfigureFPGA(str(bitfile))
         if error_code != ok.okCFrontPanel.NoError:
             raise RuntimeError(f'Configure FPGA failed {error_code}')
         if not self.dev.IsFrontPanelEnabled():
