@@ -1309,7 +1309,7 @@ class XDAQ:
         #         0         1       2        3       4
         #   (zscale, wave pin, signal, channel, stream)
         # -> zscale, wave pin, stream, channel, signal
-        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)
+        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)[..., :period * num_periods]
         n_zscale, n_test_ch, n_stream, _, signal_length = all_data.shape
         assert n_zscale == 3
         # extract only signals from the target channel which the testing signal is applied
@@ -1323,11 +1323,11 @@ class XDAQ:
             return target_channel_data
 
         # -> zscale, stream * target_channel, signal
-        measured_signal = target_channel_data[:, :, 3 + 2 * period:3 - period].reshape(
-            (3, -1, signal_length)
+        signal_to_measure = target_channel_data[..., 3 + 2 * period:3 - period].reshape(
+            (n_zscale, n_stream * n_test_ch, -1)
         )
         magnitude, phase = calculate_impedance(
-            measured_signal,
+            signal_to_measure,
             sample_rate,
             rhs=self.rhs,
             test_frequency=test_frequency,

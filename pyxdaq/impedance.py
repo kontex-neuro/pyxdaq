@@ -8,15 +8,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def amplitudeOfFreqComponent(data, sampleRate, frequency):
-    data_segment = np.array(data)
-    fft_result = np.fft.rfft(data_segment, norm='forward')
-    freqs = np.fft.fftfreq(len(data_segment), d=1 / sampleRate)
+def amplitudeOfFreqComponent(data, sample_rate, frequency):
+    if len(data) % 2 != 0:
+        data = data[:-1]  # Truncate the last sample for even length
 
-    # Find the closest frequency bin to the frequency of interest
-    target_index = np.argmin(np.abs(freqs - frequency))
+    n = np.arange(len(data))
+    cos_wave = np.cos(2 * np.pi * frequency * n / sample_rate)
+    sin_wave = -np.sin(2 * np.pi * frequency * n / sample_rate)
 
-    return fft_result[target_index] * 2
+    # Compute the real and imaginary parts
+    Re = np.dot(data, cos_wave)
+    Im = np.dot(data, sin_wave)
+    r = (Re + 1j * Im) * 2
+    return r / len(data)
 
 
 def measureComplexAmplitude(ampdata: np.ndarray, sampleRate: int, frequency: float) -> np.ndarray:
@@ -144,7 +148,7 @@ class MeasurementStrategy:
     _periods: int = None
     _duration: float = None
 
-    _min_periods: int = 5 # less than 5 periods is not enough for accurate measurement
+    _min_periods: int = 5  # less than 5 periods is not enough for accurate measurement
     _min_duration: float = None
 
     _max_duration: float = 1
