@@ -44,8 +44,10 @@ jobs:
           cp ./pyxdaq/okFrontPanel/_ok.so
           ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
+          tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
+
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: self_diagnosis ${{ matrix.os }}
-          path: dist/self_diagnosis
+          path: self_diagnosis.tar.gz
