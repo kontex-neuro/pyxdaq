@@ -23,18 +23,18 @@ jobs:
           pip install .
           pip install pyinstaller
 
-      - name: Build (Windows)
-        if: matrix.os == 'windows-2022'
-        run: >
-          pyinstaller --noconfirm
-          --add-data "config;config"
-          --add-data "bitfiles;bitfiles"
-          --collect-data pyxdaq
-          -p pyxdaq/okFrontPanel
-          -c ./scripts/self_diagnosis.py
+      # - name: Build (Windows)
+      #   if: matrix.os == 'windows-2022'
+      #   run: >
+      #     pyinstaller --noconfirm
+      #     --add-data "config;config"
+      #     --add-data "bitfiles;bitfiles"
+      #     --collect-data pyxdaq
+      #     -p pyxdaq/okFrontPanel
+      #     -c ./scripts/self_diagnosis.py
       
       - name: Build (Unix)
-        if: matrix.os != 'windows-2022'
+        if: matrix.os != 'macos-13'
         run: >
           python3 -m PyInstaller 
           --noconfirm
@@ -44,12 +44,10 @@ jobs:
           cp ./pyxdaq/okFrontPanel/_ok.so
           ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
-          tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
-
-          du -h self_diagnosis.tar.gz
+          # tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: self_diagnosis ${{ matrix.os }}
-          path: self_diagnosis.tar.gz
+          path: ./dist/self_diagnosis
