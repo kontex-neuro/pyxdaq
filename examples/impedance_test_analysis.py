@@ -70,7 +70,7 @@ def format_unit(value: float) -> Tuple[float, str]:
         value, unit = value * 1e6, 'µ'
     elif value >= 1e-9:
         value, unit = value * 1e9, 'n'
-    elif value >= 1e-12:
+    else:
         value, unit = value * 1e12, 'p'
 
     return value, unit

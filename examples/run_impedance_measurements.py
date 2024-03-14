@@ -8,8 +8,8 @@ from tqdm import tqdm
 
 def get_args():
     parser = ArgumentParser()
-    parser.add_argument('--runs', type=int, required=True, help='Number of runs to perform')
-    parser.add_argument('--output', type=str, required=True, help='Output file')
+    parser.add_argument('--runs', type=int, default=10, help='Number of runs to perform')
+    parser.add_argument('--output', type=str, default='res.npz', help='Output file')
     parser.add_argument(
         '--periods',
         type=int,
@@ -42,18 +42,20 @@ def get_args():
     )
     args = parser.parse_args()
     if args.periods is None and args.duration is None:
-        parser.error('Either --periods or --duration must be used')
+        args.duration = 0.4
+        print ('Using default duration of 0.4 seconds')
     if args.periods is not None and args.duration is not None:
         parser.error('Only one of --periods or --duration should be used')
     return args
 
+
+args = get_args()
 
 xdaq = get_XDAQ(rhs=True)
 
 if xdaq.numDataStream != 2:
     raise ValueError('This script is only compatible with one X3SR32 headstage')
 
-args = get_args()
 if args.periods is not None:
     measurement_strategy = MeasurementStrategy.from_periods(args.periods)
 else:
