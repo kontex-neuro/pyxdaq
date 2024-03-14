@@ -26,7 +26,7 @@ def enable_stim(
     phase1_ms: float,
     phase2_ms: float,
     phase3_ms: float,
-    post_pluse_ms: float,
+    post_pulse_ms: float,
     post_ampsettle_ms: float,
     post_charge_recovery_ms: float,
 ):
@@ -58,16 +58,16 @@ def enable_stim(
     elif shape != StimShape.Triphasic and phase3_ms != 0:
         raise Exception('duration_phase3_ms > 0 only allowed for Triphasic shape')
 
-    first_period = delay_ms + phase1_ms + phase2_ms + phase3_ms + post_pluse_ms
+    first_period = delay_ms + phase1_ms + phase2_ms + phase3_ms + post_pulse_ms
     resolution = 1 / xdaq.sampleRate.rate * 1e3  # ms
     if first_period / resolution > 2**16:
         raise Exception(f'Stimulation period too long, max {2**16 * resolution:.2f} ms')
     if pre_ampsettle_ms > delay_ms:
         raise Exception('Pre amp settle out of range')
-    if post_ampsettle_ms > post_pluse_ms:
+    if post_ampsettle_ms > post_pulse_ms:
         raise Exception('Post amp settle out of range')
 
-    if post_charge_recovery_ms > post_pluse_ms:
+    if post_charge_recovery_ms > post_pulse_ms:
         raise Exception('Post charge recovery out of range')
     if trigger == TriggerEvent.Level:
         if trigger_pol == TriggerPolarity.Low:
@@ -89,7 +89,7 @@ def enable_stim(
         'pre_ampsettle_ms': pre_ampsettle_ms,
         'post_ampsettle_ms': post_ampsettle_ms,
         'pulses': pulses,
-        'duration_pulse_ms': post_pluse_ms,
+        'duration_pulse_ms': post_pulse_ms,
         'trigger': trigger,
         'trigger_source': trigger_source,
         'trigger_pol': trigger_pol,

@@ -3,7 +3,7 @@ import time
 from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
-from pyxdaq.impedance import TestFrequency
+from pyxdaq.impedance import Frequency
 
 xdaq = get_XDAQ(rhs=True)
 
@@ -18,9 +18,9 @@ print(xdaq.ports)
 #%%
 
 
-def pluses(mA: float, frequency: float):
+def create_monophasic_pulse(mA: float, frequency: float):
     """
-    Create a basic pluse with duty cycle 50%, current can be positive or negative.
+    Create a basic pulse with duty cycle 50%, current can be positive or negative.
          |-----|     |-----|
          |     |     |     |
     -----|     |-----|     |-----
@@ -31,9 +31,9 @@ def pluses(mA: float, frequency: float):
     return (lambda **kwargs: kwargs)(
         # Polarity of the first phase
         polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
-        # Shape of the pluse
+        # Shape of the pulse
         shape=StimShape.Monophasic,
-        # Delay between the trigger and the start of the pluse
+        # Delay between the trigger and the start of the pulse
         delay_ms=0,
         # Duration of the first phase, there are only one phase in Monophasic shape
         phase1_ms=half_period_ms,
@@ -48,20 +48,20 @@ def pluses(mA: float, frequency: float):
         pre_ampsettle_ms=0,
         post_ampsettle_ms=half_period_ms,
         post_charge_recovery_ms=0,
-        # The duration after the pluse before the next pluse
-        post_pluse_ms=half_period_ms,
-        # Sending pluses continuously when the trigger is high
+        # The duration after the pulse before the next pulse
+        post_pulse_ms=half_period_ms,
+        # Sending pulses continuously when the trigger is high
         trigger=TriggerEvent.Level,
         trigger_pol=TriggerPolarity.High,
-        # Since we are using Level trigger, sending one pluse each time
+        # Since we are using Level trigger, sending one pulse each time
         pulses=1,
     )
 
 
-# Swap out the pluses function with this one to send biphasic pluses
-def biphasic_pluses(mA: float, frequency: float):
+# Swap out the pulses function with this one to send biphasic pulses
+def create_biphasic_pulse(mA: float, frequency: float):
     """
-    Create a biphasic pluse
+    Create a biphasic pulse
              |---------|                   |---------|
              |         |                   |         |
     ---------|         |         |---------|         |
@@ -71,7 +71,7 @@ def biphasic_pluses(mA: float, frequency: float):
              |-phase1--|                   |-phase1--| ...
                        |-phase2--|         |
                                  | post    |
-                                   pluse   |
+                                   pulse   |
 
     |-----------------period---------------| = 1/frequency
     """
@@ -89,7 +89,7 @@ def biphasic_pluses(mA: float, frequency: float):
         pre_ampsettle_ms=0,
         post_ampsettle_ms=period_ms / 3,
         post_charge_recovery_ms=0,
-        post_pluse_ms=period_ms / 3,
+        post_pulse_ms=period_ms / 3,
         trigger=TriggerEvent.Level,
         trigger_pol=TriggerPolarity.High,
         pulses=1,
@@ -101,8 +101,8 @@ def send_pulses(
     stream: int,
     channel: int,
     duration_ms: float,
-    pluse_current_mA: float,
-    pluse_frequency: float,
+    pulse_current_mA: float,
+    pulse_frequency: float,
 ):
     # The software trigger id, 0~7, can be shared by multiple stim
     software_trigger_id = 0
@@ -114,7 +114,7 @@ def send_pulses(
         channel=channel,
         # Trigger source, 24~31 is the software trigger 0~7
         trigger_source=24 + software_trigger_id,
-        **pluses(pluse_current_mA, pluse_frequency)
+        **create_monophasic_pulse(pulse_current_mA, pulse_frequency)
     )
 
     # Enable software trigger
@@ -148,15 +148,15 @@ target_channel = 0
 for i in range(3):
     print(f'Run {i+1}: Checking impedance at 1000 Hz')
     magnitude1000, phase1000 = xdaq.measure_impedance(
-        test_frequency=TestFrequency(1000), channels=[target_channel], progress=False
+        frequency=Frequency(1000), channels=[target_channel], progress=False
     )
     print(f'Impedance at 1000 Hz: {magnitude1000[target_stream,0]:.2f} Ohm')
-    print(f'Sending 50Hz 1mA pluses for 1 second (dutycycle 50%)')
+    print(f'Sending 50Hz 1mA pulses for 1 second (dutycycle 50%)')
     run_steps = send_pulses(
         xdaq,
         stream=target_stream,
         channel=target_channel,
         duration_ms=1000,
-        pluse_current_mA=2,
-        pluse_frequency=50
+        pulse_current_mA=2,
+        pulse_frequency=50
     )

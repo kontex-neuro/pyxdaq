@@ -1,6 +1,5 @@
 from pyxdaq.xdaq import get_XDAQ
-from pathlib import Path
-from pyxdaq.impedance import MeasurementStrategy, TestFrequency
+from pyxdaq.impedance import Strategy, Frequency
 import numpy as np
 from argparse import ArgumentParser
 from tqdm import tqdm
@@ -43,7 +42,7 @@ def get_args():
     args = parser.parse_args()
     if args.periods is None and args.duration is None:
         args.duration = 0.4
-        print ('Using default duration of 0.4 seconds')
+        print('Using default duration of 0.4 seconds')
     if args.periods is not None and args.duration is not None:
         parser.error('Only one of --periods or --duration should be used')
     return args
@@ -57,16 +56,16 @@ if xdaq.numDataStream != 2:
     raise ValueError('This script is only compatible with one X3SR32 headstage')
 
 if args.periods is not None:
-    measurement_strategy = MeasurementStrategy.from_periods(args.periods)
+    strategy = Strategy.from_periods(args.periods)
 else:
-    measurement_strategy = MeasurementStrategy.from_duration(args.duration)
+    strategy = Strategy.from_duration(args.duration)
 
 test_frequencies = np.logspace(
     np.log10(args.low_frequency), np.log10(args.high_frequency), args.test_points
 )
 test_frequencies = np.array(
     [
-        TestFrequency(f).get_actual(xdaq.sampleRate.rate, display_warning=False)
+        Frequency(f).get_actual(xdaq.sampleRate.rate, display_warning=False)
         for f in test_frequencies
     ]
 )
@@ -80,11 +79,11 @@ results = [
     np.array(
         [
             xdaq.measure_impedance(
-                test_frequency=TestFrequency(frequency),
+                frequency=Frequency(frequency),
                 channels=test_channels,
                 progress=args.progress > 1,
-                measurement_strategy=measurement_strategy,
-                raw_measurement_only=True
+                strategy=strategy,
+                raw_data_return=True
             )
             for _ in tqdm(range(args.runs), desc='Runs', disable=args.progress == 0)
         ]
@@ -98,5 +97,5 @@ np.savez_compressed(
     test_frequencies=test_frequencies,
     test_channels=test_channels,
     sample_rate=[xdaq.sampleRate.rate],
-    periods=[TestFrequency(f).get_period(xdaq.sampleRate.rate) for f in test_frequencies],
+    periods=[Frequency(f).get_period(xdaq.sampleRate.rate) for f in test_frequencies],
 )

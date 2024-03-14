@@ -1,7 +1,7 @@
 #%%
 from dataclasses import dataclass
 from functools import partial
-from pyxdaq.impedance import calculate_impedance, TestFrequency
+from pyxdaq.impedance import calculate_impedance, Frequency
 from pyxdaq.datablock import amplifier2mv
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,7 +22,7 @@ num_runs, num_caps, num_streams, num_chs, _ = raw_measurements[0].shape
 
 def get_impedance(raw_measurements, sample_rate, test_frequencies, periods):
 
-    def get_impedance_for_runs(raw_at_f: np.ndarray, test_frequency: float, period: int):
+    def get_impedance_for_runs(raw_at_f: np.ndarray, frequency: float, period: int):
         # Runs, Caps, Streams, Channels, Signal
         runs, caps, streams, chs, siglen = raw_at_f.shape
         # Runs, Caps, Streams * Channels, Signal
@@ -37,14 +37,14 @@ def get_impedance(raw_measurements, sample_rate, test_frequencies, periods):
                 all_signals=raw_at_f[:, :, 3 + period * 2:3 - period],
                 sample_rate=sample_rate,
                 rhs=True,
-                test_frequency=test_frequency,
+                frequency=frequency,
                 return_cap=True,
             )
         ).reshape((3, runs, streams, chs))
 
     return np.array(
         [
-            get_impedance_for_runs(raw_at_f, test_frequency, period) for raw_at_f, test_frequency,
+            get_impedance_for_runs(raw_at_f, frequency, period) for raw_at_f, frequency,
             period in tqdm(zip(raw_measurements, test_frequencies, periods))
         ]
     )
@@ -154,7 +154,7 @@ plot_target_freqs = np.logspace(np.log10(1), np.log10(10000), 100)
 plot_target_expected_magnitude, plot_target_expected_phase = impedance_module.calculate_expected_impedance(
     plot_target_freqs
 )
-plot_actual_freqs = TestFrequency(plot_target_freqs).get_actual(sample_rate, display_warning=False)
+plot_actual_freqs = Frequency(plot_target_freqs).get_actual(sample_rate, display_warning=False)
 plot_actual_expected_magnitude, plot_actual_expected_phase = impedance_module.calculate_expected_impedance(
     plot_actual_freqs
 )
@@ -293,7 +293,7 @@ def plot_test_signal_and_measured_waveform():
         all_signals=raw[:, :, 3 + period * 2:3 - period],
         sample_rate=sample_rate,
         rhs=True,
-        test_frequency=test_frequencies[freq_idx],
+        frequency=test_frequencies[freq_idx],
         return_cap=True,
     )
     start, end = 2 * period, -period

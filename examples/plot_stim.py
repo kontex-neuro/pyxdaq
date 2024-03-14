@@ -13,7 +13,7 @@ print(xdaq.ports)
 #%%
 
 
-def pluses(mA: float, frequency: float):
+def pulses(mA: float, frequency: float):
     phase_period_ms = 1e3 / frequency / 3
     return (lambda **kwargs: kwargs)(
         polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
@@ -22,26 +22,26 @@ def pluses(mA: float, frequency: float):
         phase1_ms=phase_period_ms,
         phase2_ms=phase_period_ms,
         phase3_ms=0,
-        amp_phase1_mA=mA,
-        amp_phase2_mA=mA,
+        amp_neg_mA=mA,
+        amp_pos_mA=mA,
         pre_ampsettle_ms=0,
         post_ampsettle_ms=phase_period_ms,
         post_charge_recovery_ms=0,
         pulses=1,
-        post_pluse_ms=phase_period_ms,
+        post_pulse_ms=phase_period_ms,
         trigger=TriggerEvent.Level,
         trigger_pol=TriggerPolarity.High,
         step_size=StimStepSize.StimStepSize10uA,
     )
 
 
-def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pluse_current_mA, pluse_frequency):
+def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pulse_current_mA, pulse_frequency):
     disable_stim = enable_stim(
         xdaq=xdaq,
         stream=stream,
         channel=channel,
         trigger_source=24,
-        **pluses(pluse_current_mA, pluse_frequency)
+        **pulses(pulse_current_mA, pulse_frequency)
     )
     xdaq.dev.SetWireInValue(RHS.WireInManualTriggers, 0x1)
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
@@ -98,8 +98,8 @@ run_steps = send_pulses(
     stream=target_stream,
     channel=target_channel,
     duration_ms=1000,
-    pluse_current_mA=1,
-    pluse_frequency=10
+    pulse_current_mA=1,
+    pulse_frequency=10
 )
 
 plot_stim(

@@ -61,7 +61,7 @@ def calculate_impedance(
     all_signals: np.ndarray,
     sample_rate: float,
     rhs: bool,
-    test_frequency: float,
+    frequency: float,
     return_cap: bool = False,
 ):
     if len(all_signals.shape) != 3:
@@ -73,20 +73,20 @@ def calculate_impedance(
     res = measureComplexAmplitude(
         amplifier2mv(
             all_signals.reshape((-1, signal_length)),
-        ), sample_rate, test_frequency
+        ), sample_rate, frequency
     ).reshape((caps, tests))
 
     cap = np.array([0.1e-12, 1e-12, 10e-12])
     dacVoltageAmplitude = 128 * (1.225 / 256)  # this assumes the DAC amplitude was set to 128
-    relativeFreq = test_frequency / sample_rate
-    saturate_voltage = approximateSaturationVoltage(test_frequency, 7500)
+    relativeFreq = frequency / sample_rate
+    saturate_voltage = approximateSaturationVoltage(frequency, 7500)
     # find the best cap for each channel by looking at largest cap that doesn't saturate
     best_idx = 2 - np.argmax(np.abs(res[::-1, :]) < saturate_voltage, axis=0)
     saturated_cap3 = np.abs(res[1, :]) / np.abs(res[2, :]) > 0.2
     best_idx -= saturated_cap3 & (best_idx == 2)  # if cap 3 is saturated, use cap 2
     best_cap = cap[best_idx]
     best = np.choose(best_idx, res)
-    current = 2 * np.pi * test_frequency * best_cap * dacVoltageAmplitude
+    current = 2 * np.pi * frequency * best_cap * dacVoltageAmplitude
     magnitude = np.abs(best) / current * 1e-6 * (18 * relativeFreq * relativeFreq + 1)
 
     if rhs:
@@ -94,7 +94,7 @@ def calculate_impedance(
     else:
         parasiticCapacitance = 15.0e-12
     magnitude, phase = factor_out_parallel_capacitance(
-        magnitude, np.angle(best), test_frequency, parasiticCapacitance
+        magnitude, np.angle(best), frequency, parasiticCapacitance
     )
 
     if rhs:
@@ -107,7 +107,7 @@ def calculate_impedance(
 
 
 @dataclass
-class TestFrequency:
+class Frequency:
     """
     Not every frequency is achievable with the current sample rate. This class helps to find the 
     actual frequency that will be used for testing and the actual period of the testing sine wave.
@@ -134,7 +134,7 @@ class TestFrequency:
 
 
 @dataclass
-class MeasurementStrategy:
+class Strategy:
     """
     Helper class to compute the number of periods per measurement based on 
     the desired test frequency and the minimum duration of the measurement.
@@ -142,8 +142,8 @@ class MeasurementStrategy:
     This class is not meant to be instantiated directly, use the class methods
     to create an instance.
     Examples:
-        MeasurementStrategy.auto()
-        MeasurementStrategy.from_periods(10)
+        Strategy.auto()
+        Strategy.from_periods(10)
     """
     _periods: int = None
     _duration: float = None
@@ -175,10 +175,10 @@ class MeasurementStrategy:
     def from_duration(cls, duration_in_second: float):
         return cls(_duration=duration_in_second)
 
-    def get_num_periods(self, test_frequency: float) -> int:
+    def get_num_periods(self, frequency: float) -> int:
         min_periods_from_min_duration = 0
         if self._min_duration is not None:
-            min_periods_from_min_duration = math.ceil(self._min_duration * test_frequency)
+            min_periods_from_min_duration = math.ceil(self._min_duration * frequency)
         min_periods_from_both = 0
         if self._min_periods is not None:
             min_periods_from_both = max(self._min_periods, min_periods_from_min_duration)
@@ -186,7 +186,7 @@ class MeasurementStrategy:
         if self._periods is not None:
             periods = max(self._periods, min_periods_from_both)
         elif self._duration is not None:
-            periods_from_duration = math.ceil(self._duration * test_frequency)
+            periods_from_duration = math.ceil(self._duration * frequency)
             if periods_from_duration < min_periods_from_both:
                 raise ValueError(
                     f'Number of periods from duration ({periods_from_duration}) '
@@ -196,9 +196,9 @@ class MeasurementStrategy:
         else:
             periods = min_periods_from_both
 
-        if periods / test_frequency > self._max_duration:
+        if periods / frequency > self._max_duration:
             raise ValueError(
-                f'Measurement duration for {periods} periods at {test_frequency} Hz '
+                f'Measurement duration for {periods} periods at {frequency} Hz '
                 f'is greater than the maximum duration ({self._max_duration:.2f} seconds)'
             )
         return periods
