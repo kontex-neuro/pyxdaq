@@ -36,12 +36,13 @@ jobs:
       - name: Build (Unix)
         if: matrix.os != 'windows-2022'
         run: >
-          pyinstaller --noconfirm
-          --add-data "config:config"
-          --add-data "bitfiles:bitfiles"
-          --collect-data pyxdaq
-          -p pyxdaq/okFrontPanel
-          -c ./scripts/self_diagnosis.py
+          python3 -m PyInstaller 
+          --noconfirm
+          --collect-all pyxdaq
+          --console ./scripts/self_diagnosis.py
+
+          cp ./pyxdaq/okFrontPanel/_ok.so
+          ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v2

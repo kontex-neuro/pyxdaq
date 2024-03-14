@@ -16,7 +16,7 @@ __pycache__
 /.pytest_cache
 
 # OS
-/.DS_Store
+.DS_Store
 
 # Project
 /diagnostic_report.json
@@ -25,3 +25,6 @@ __pycache__
 /dist
 /build
 /*.spec
+
+# numpy
+*.npz

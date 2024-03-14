@@ -9,8 +9,6 @@ dependencies = [
     "rich",
     "tqdm",
     "matplotlib",
-    "seaborn",
-    "scipy",
     "tox",
 ]
 

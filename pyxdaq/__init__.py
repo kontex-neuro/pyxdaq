@@ -3,7 +3,7 @@ from pathlib import Path
 try:
     from .okFrontPanel import ok
 except ImportError as e:
-
+    
     class _OkMock:
         is_mock = True
 
