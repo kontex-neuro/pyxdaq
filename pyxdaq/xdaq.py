@@ -3,7 +3,6 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from pathlib import Path
 from typing import List, Tuple, Union
 from tqdm.auto import tqdm
 
@@ -658,6 +657,9 @@ class XDAQ:
         self.dev.SetWireInValue(self.ep.WireInGlobalSettleSelect, v, 0x1f)
 
     def setStimCmdMode(self, enabled: bool):
+        """
+        Enable or disable stimulation for XDAQ
+        """
         if not self.rhs:
             return
         self.dev.SetWireInValue(self.ep.WireInStimCmdMode, enabled * 0x1, 0x1)
@@ -1026,9 +1028,19 @@ class XDAQ:
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
         )
 
-    def runAndReadDataBlock(self, samples, discard=False) -> DataBlock:
+    def runAndReadDataBlock(self, samples: int, discard: bool = False) -> Union[DataBlock, None]:
+        """
+        Run the data acquisition and read the data after the acquisition is done.
+
+        Parameters
+        ----------
+        samples : int
+            Number of samples to acquire.
+        discard : bool
+            Not to read the data after the acquisition.
+        """
         if discard:
-            return self.runAndReadBuffer(samples, discard)
+            return self.runAndReadBuffer(samples, True)
         n, buffer = self.runAndReadBuffer(samples, False)
         return DataBlock.from_buffer(
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
@@ -1121,6 +1133,9 @@ class XDAQ:
         self.selectAuxCommandBank('all', 2, 2 if fastSettle else 1)
 
     def manual_trigger(self, trigger: int, enable: bool):
+        """
+        Turn on or off manual triggers for a particular trigger event.
+        """
         if not self.rhs:
             return
         self.dev.SetWireInValue(RHS.WireInManualTriggers, int(enable) << trigger, 1 << trigger)

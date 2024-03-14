@@ -122,9 +122,11 @@ def send_pulses(
     # Calculate the number of steps to run, the number of steps should be multiple of 128 to avoid alignment error
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
 
-    # Set the maximum number of steps to run and start running.
     # Start running
     xdaq.setStimCmdMode(True)
+    # Speed up the process by discarding the reading of the data block
+    # It's possible to run without blocking the script, but this will require more complex logic
+    # See runAndReadDataBlock function for more fine-grained control
     xdaq.runAndReadDataBlock(run_steps, discard=True)
     xdaq.setStimCmdMode(False)
     # Stop running
