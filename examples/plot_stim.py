@@ -1,5 +1,4 @@
 #%%
-import time
 from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.datablock import DataBlock, adc2v
@@ -45,14 +44,12 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pulse_current_mA, puls
     )
     xdaq.dev.SetWireInValue(RHS.WireInManualTriggers, 0x1)
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
-    xdaq.setMaxTimeStep(run_steps)
-    xdaq.setContinuousRunMode(False)
-    xdaq.run()
-    while xdaq.is_running():
-        time.sleep(0.1)
+    xdaq.setStimCmdMode(True)
+    samples = xdaq.runAndReadDataBlock(run_steps).to_samples()
+    xdaq.setStimCmdMode(False)
     xdaq.dev.SetWireInValue(RHS.WireInManualTriggers, 0x0)
     disable_stim()
-    return run_steps
+    return samples
 
 
 def plot_stim(sps: DataBlock, target_channel: int, target_stream: int):
@@ -93,7 +90,7 @@ def plot_stim(sps: DataBlock, target_channel: int, target_stream: int):
 target_stream = 0
 target_channel = 0
 
-run_steps = send_pulses(
+samples = send_pulses(
     xdaq,
     stream=target_stream,
     channel=target_channel,
@@ -102,8 +99,4 @@ run_steps = send_pulses(
     pulse_frequency=10
 )
 
-plot_stim(
-    xdaq.readDataBlock(run_steps).to_samples(),
-    target_channel,
-    target_stream,
-)
+plot_stim(samples, target_channel, target_stream)

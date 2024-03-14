@@ -327,6 +327,9 @@ class XDAQ:
     def run(self):
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 0)
 
+    def resetSequencers(self):
+        self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 1)
+
     def is_running(self):
         return self.dev.GetWireOutValue(self.ep.WireOutSpiRunning)
 
@@ -906,12 +909,10 @@ class XDAQ:
 
             self.selectAuxCommandBank('all', 2, 2 if fastSettle else 1)
 
-    def changeSampleRate(
-        self, sampleRate: SampleRate, fastSettle: bool = False, update_stim: bool = False
-    ):
+    def changeSampleRate(self, sampleRate: SampleRate, fastSettle: bool = False):
         self.setSampleRate(sampleRate)
         if not self.rhs:
-            self.setDacHighpassFilter(250, sampleRate.value[2])
+            self.setDacHighpassFilter(250, sampleRate.rate)
 
         self.uploadCommands(fastSettle)
 
@@ -1006,13 +1007,18 @@ class XDAQ:
         buffer = bytearray(max(((bs + 1023) // 1024) * 1024, 1024))
         return self.readDataToBuffer(buffer), buffer
 
-    def runAndReadBuffer(self, samples) -> Tuple[int, bytearray]:
+    def runAndReadBuffer(self, samples, discard=False) -> Tuple[int, bytearray, None]:
+        self.resetSequencers()
         self.setMaxTimeStep(samples)
         self.setContinuousRunMode(False)
         self.run()
         while self.is_running() > 0:
             time.sleep(0.001)
-        return self.readBuffer(samples)
+        if discard:
+            self.discardFIFO()
+            return None
+        else:
+            return self.readBuffer(samples)
 
     def readDataBlock(self, samples) -> DataBlock:
         n, buffer = self.readBuffer(samples)
@@ -1020,8 +1026,10 @@ class XDAQ:
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
         )
 
-    def runAndReadDataBlock(self, samples) -> DataBlock:
-        n, buffer = self.runAndReadBuffer(samples)
+    def runAndReadDataBlock(self, samples, discard=False) -> DataBlock:
+        if discard:
+            return self.runAndReadBuffer(samples, discard)
+        n, buffer = self.runAndReadBuffer(samples, False)
         return DataBlock.from_buffer(
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
         )
@@ -1037,21 +1045,10 @@ class XDAQ:
             for stream in range(32):
                 self.enableDataStream(stream, (stream % 2) == 0)
         self.selectAuxCommandBank('all', 2, 0)
-        self.setMaxTimeStep(128)
-        self.setContinuousRunMode(False)
         results = []
-        sample_size = self.getSampleSizeBytes()
         for delay in range(16):
             self.setCableDelay('all', delay)
-            self.run()
-            while self.is_running() > 0:
-                time.sleep(0.003)
-            bs = self.getBlockSizeBytes()
-            buffer = bytearray(max(((bs + 1023) // 1024) * 1024, 1024))
-            self.readDataToBuffer(buffer)
-            sp = DataBlock.from_buffer(
-                self.rhs, sample_size, buffer, self.numDataStream, self.mode32DIO
-            ).to_samples()
+            sp = self.runAndReadDataBlock(128).to_samples()
             nameok = (sp.device_name().T.astype(np.uint8) == headstagename).all(axis=1)
             ids, miso = sp.device_id()
             results.append(
@@ -1084,8 +1081,8 @@ class XDAQ:
         return delay, *zip(*[cast(*results[delay[s]][s]) for s in range(n_streams)])
 
     def findConnectedAmplifiers(self):
-        for sampleRate in sorted(list(SampleRate), key=lambda x: x.value[2], reverse=True):
-            self.changeSampleRate(sampleRate)
+        for sample_rate in sorted(list(SampleRate), key=lambda x: x.value[2], reverse=True):
+            self.changeSampleRate(sample_rate)
             self.ports = XDAQPorts.fromChipInfos(
                 self.testCableDelay(), 2, 1 if self.rhs else 2, not self.rhs
             )
@@ -1183,8 +1180,8 @@ class XDAQ:
         reg = self.getreg(self.sampleRate)
         reg.setStimStepSize(step_size)
         cmd = reg.createCommandListSetStimMagnitudes(
-            magnitude_neg=int((amp_neg_mA * 1e6) // step_size.nA),
-            magnitude_pos=int((amp_pos_mA * 1e6) // step_size.nA),
+            magnitude_neg=int((amp_neg_mA * 1e6) // step_size.nA) if enable else 0,
+            magnitude_pos=int((amp_pos_mA * 1e6) // step_size.nA) if enable else 0,
             channel=channel
         )
         self.uploadCommandList(cmd, 0, 0)
@@ -1193,13 +1190,9 @@ class XDAQ:
         cmd = reg.dummy(8192)
         for aux in [1, 2, 3]:
             self.uploadCommandList(cmd, aux, 0)
-        self.setMaxTimeStep(128)
-        self.setContinuousRunMode(False)
         self.setStimCmdMode(False)
         self.enableAuxCommandsOnOneStream(stream)
-        self.run()
-        while self.is_running():
-            time.sleep(0.1)
+        self.runAndReadBuffer(samples=128, discard=True)
 
         reg.set_upper_bandwidth(7500)
         reg.set_lower_bandwidth_a(1000)
@@ -1208,13 +1201,12 @@ class XDAQ:
         cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=True)
         self.uploadCommandList(cmd, 0, 0)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
-        self.runAndReadBuffer(samples=128)
+        self.runAndReadBuffer(samples=128, discard=True)
 
         cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
         self.uploadCommandList(cmd, 0, 0)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
         self.enableAuxCommandsOnAllStreams()
-        self.setStimCmdMode(True)
 
     def measure_impedance(
         self,
@@ -1254,6 +1246,7 @@ class XDAQ:
         When raw_data_return is True:
         raw_data: np.ndarray
         """
+        self.setStimCmdMode(False)
         for i in range(8):
             self.enableExternalDigOut(i, False)
         for i in range(8):

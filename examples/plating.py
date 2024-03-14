@@ -1,9 +1,8 @@
 #%%
-import time
 from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
-from pyxdaq.impedance import Frequency
+from pyxdaq.impedance import Frequency, Strategy
 
 xdaq = get_XDAQ(rhs=True)
 
@@ -125,15 +124,10 @@ def send_pulses(
 
     # Set the maximum number of steps to run and start running.
     # Start running
-    xdaq.setMaxTimeStep(run_steps)
-    xdaq.setContinuousRunMode(False)
-    xdaq.run()
-    while xdaq.is_running():
-        time.sleep(0.1)
+    xdaq.setStimCmdMode(True)
+    xdaq.runAndReadDataBlock(run_steps, discard=True)
+    xdaq.setStimCmdMode(False)
     # Stop running
-    # The code between Start running and Stop running can be replaced by
-    # xdaq.readDataBlock(run_steps).to_samples()
-    # But it will take slightly longer time to run, since it will read data from FPGA
 
     # Disable software trigger after the run
     xdaq.manual_trigger(software_trigger_id, False)
@@ -148,10 +142,14 @@ target_channel = 0
 for i in range(3):
     print(f'Run {i+1}: Checking impedance at 1000 Hz')
     magnitude1000, phase1000 = xdaq.measure_impedance(
-        frequency=Frequency(1000), channels=[target_channel], progress=False
+        frequency=Frequency(1000),
+        # 0.2 seconds per measurement
+        strategy=Strategy.from_duration(0.2),
+        channels=[target_channel],
+        progress=False
     )
     print(f'Impedance at 1000 Hz: {magnitude1000[target_stream,0]:.2f} Ohm')
-    print(f'Sending 50Hz 1mA pulses for 1 second (dutycycle 50%)')
+    print(f'Sending 50Hz 2mA pulses for 1 second (dutycycle 50%)')
     run_steps = send_pulses(
         xdaq,
         stream=target_stream,
