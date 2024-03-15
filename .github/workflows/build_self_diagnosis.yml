@@ -40,19 +40,18 @@ jobs:
         run: >
           python3 -m PyInstaller 
           --noconfirm
-          --onefile
           --collect-all pyxdaq
           --console ./scripts/self_diagnosis.py
 
-          # tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
+          cp ./pyxdaq/okFrontPanel/_ok.so
+          ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
-          # cp ./pyxdaq/okFrontPanel/_ok.so
-          # ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
+          tar -zcf self_diagnosis.tar.gz ./dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: self_diagnosis_${{ matrix.os }}
           path: |
-            ./dist/self_diagnosis
+            ./dist
             self_diagnosis.tar.gz
