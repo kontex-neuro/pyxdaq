@@ -43,7 +43,7 @@ jobs:
           --collect-all pyxdaq
           --console ./scripts/self_diagnosis.py
 
-          tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis.py
+          tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
 
           # cp ./pyxdaq/okFrontPanel/_ok.so
           # ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
