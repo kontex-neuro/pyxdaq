@@ -42,12 +42,10 @@ jobs:
           --collect-submodules pyxdaq
           --console ./scripts/self_diagnosis.py
 
-          # _ok.so is an universal binary with x86_64 and arm64
           cp ./pyxdaq/okFrontPanel/_ok.so
           ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
-          # compress ./dist/self_diagnosis to preserve permissions
-          tar -zcf self_diagnosis.tar.gz ./dist
+          tar -zcf ./self_diagnosis.tar.gz ./dist
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -55,4 +53,4 @@ jobs:
           name: self-diagnosis-${{ matrix.os }}-py${{ matrix.python-version }} 
           path: |
             ./dist/self_diagnosis.exe
-            self_diagnosis.tar.gz
+            ./self_diagnosis.tar.gz
