@@ -55,4 +55,4 @@ jobs:
           name: self-diagnosis-${{ matrix.os }}-py${{ matrix.python-version }} 
           path: |
             ./dist/self_diagnosis.exe
-            ./self_diagnosis.tar.gz
+            self_diagnosis.tar.gz
