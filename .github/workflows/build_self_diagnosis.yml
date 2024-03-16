@@ -8,15 +8,16 @@ jobs:
       matrix:
         # os: [windows-2022, macos-13, ubuntu-22.04]
         os: [windows-2022, macos-13]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
     name: ${{ matrix.os }}-build
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Setup Python ${{ matrix.python-version }} 
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+        python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
         run: |
@@ -29,29 +30,29 @@ jobs:
           python3 -m PyInstaller 
           --noconfirm
           --onefile
-          --collect-all pyxdaq
+          --collect-submodules pyxdaq
           --console ./scripts/self_diagnosis.py
-
-          # cp ./pyxdaq/okFrontPanel/_ok.so
-          # ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
       
-      - name: Build (Unix)
+      - name: Build (macOS)
         if: matrix.os == 'macos-13'
         run: >
           python3 -m PyInstaller 
           --noconfirm
-          --collect-all pyxdaq
+          --onedir
+          --collect-submodules pyxdaq
           --console ./scripts/self_diagnosis.py
 
+          # _ok.so is an universal binary with x86_64 and arm64
           cp ./pyxdaq/okFrontPanel/_ok.so
           ./dist/self_diagnosis/_internal/pyxdaq/okFrontPanel/
 
-          tar -zcf self_diagnosis.tar.gz ./dist
+          # compress ./dist/self_diagnosis to preserve permissions
+          tar -zcf self_diagnosis.tar.gz ./dist/self_diagnosis
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: self_diagnosis_${{ matrix.os }}
+          name: self-diagnosis-${{ matrix.os }}
           path: |
-            ./dist
-            self_diagnosis.tar.gz
+            ./dist/self_diagnosis.exe
+            ./self_diagnosis.tar.gz
