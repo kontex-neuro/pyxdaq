@@ -44,12 +44,12 @@
         { "name": "stimEnableA", "reg": 32, "start": 0, "end": 15, "mode": "rw", "default": "0xAAAA"},
         { "name": "stimEnableB", "reg": 33, "start": 0, "end": 15, "mode": "rw", "default":"0x00FF" },
 
-        { "name": "stepSel1", "reg": 34, "start": 0, "end": 6, "mode": "rw" , "default": 15},
-        { "name": "stepSel2", "reg": 34, "start": 7, "end": 12, "mode": "rw" },
-        { "name": "stepSel3", "reg": 34, "start": 13, "end": 14, "mode": "rw" },
+        { "name": "stepSel1", "reg": 34, "start": 0, "end": 6, "mode": "rw" , "default": 64},
+        { "name": "stepSel2", "reg": 34, "start": 7, "end": 12, "mode": "rw", "default": 19},
+        { "name": "stepSel3", "reg": 34, "start": 13, "end": 14, "mode": "rw","default": 3},
 
-        { "name": "stimNbias", "reg": 35, "start": 0, "end": 3, "mode": "rw", "default":15},
-        { "name": "stimPbias", "reg": 35, "start": 4, "end": 7, "mode": "rw", "default":15},
+        { "name": "stimNbias", "reg": 35, "start": 0, "end": 3, "mode": "rw", "default": 6},
+        { "name": "stimPbias", "reg": 35, "start": 4, "end": 7, "mode": "rw", "default": 6},
 
         { "name": "chargeRecoveryDAC", "reg": 36, "start": 0, "end": 7, "mode": "rw" , "default":128},
 

@@ -1195,8 +1195,8 @@ class XDAQ:
         reg = self.getreg(self.sampleRate)
         reg.setStimStepSize(step_size)
         cmd = reg.createCommandListSetStimMagnitudes(
-            magnitude_neg=int((amp_neg_mA * 1e6) // step_size.nA) if enable else 0,
-            magnitude_pos=int((amp_pos_mA * 1e6) // step_size.nA) if enable else 0,
+            magnitude_neg=int(min(255, round(amp_neg_mA * 1e6 / step_size.nA))) if enable else 0,
+            magnitude_pos=int(min(255, round(amp_pos_mA * 1e6 / step_size.nA))) if enable else 0,
             channel=channel
         )
         self.uploadCommandList(cmd, 0, 0)
@@ -1222,6 +1222,7 @@ class XDAQ:
         self.uploadCommandList(cmd, 0, 0)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
         self.enableAuxCommandsOnAllStreams()
+        self.runAndReadBuffer(samples=128, discard=True)
 
     def measure_impedance(
         self,
