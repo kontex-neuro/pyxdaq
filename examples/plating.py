@@ -3,6 +3,7 @@ from pyxdaq.xdaq import get_XDAQ, XDAQ
 from pyxdaq.stim import enable_stim
 from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
 from pyxdaq.impedance import Frequency, Strategy
+import math
 
 xdaq = get_XDAQ(rhs=True)
 
@@ -15,6 +16,23 @@ print(xdaq.ports)
 # The get_XDAQ function will connect to the XDAQ and detect the number of headstages connected
 
 #%%
+
+
+def find_step_size(target_na):
+    """
+    Find the best step size to reach the target current
+    """
+    best_error = float('inf')
+    best = None
+    for step_size in StimStepSize:
+        if math.isnan(step_size.nA):
+            continue
+        steps = min(255, round(target_na / step_size.nA))  # 255 is the maximum current step
+        error = abs(target_na - step_size.nA * steps)
+        if error < best_error:
+            best_error = error
+            best = step_size
+    return best
 
 
 def create_monophasic_pulse(mA: float, frequency: float):
@@ -38,8 +56,7 @@ def create_monophasic_pulse(mA: float, frequency: float):
         phase1_ms=half_period_ms,
         phase2_ms=0,
         phase3_ms=0,
-        # Use 10uA step size, the current will be truncated to the nearest 10uA
-        step_size=StimStepSize.StimStepSize10uA,
+        step_size=find_step_size(abs(mA) * 1e6),
         # Current of the positive and negative phase, both value should be positive
         amp_neg_mA=0 if mA > 0 else -mA,
         amp_pos_mA=mA if mA > 0 else 0,
@@ -82,7 +99,7 @@ def create_biphasic_pulse(mA: float, frequency: float):
         phase1_ms=period_ms / 3,
         phase2_ms=period_ms / 3,
         phase3_ms=0,
-        step_size=StimStepSize.StimStepSize10uA,
+        step_size=find_step_size(abs(mA) * 1e6),
         amp_neg_mA=abs(mA),
         amp_pos_mA=abs(mA),
         pre_ampsettle_ms=0,
@@ -141,6 +158,7 @@ def send_pulses(
 
 target_stream = 0
 target_channel = 0
+current_mA = 0.06
 for i in range(3):
     print(f'Run {i+1}: Checking impedance at 1000 Hz')
     magnitude1000, phase1000 = xdaq.measure_impedance(
@@ -151,12 +169,12 @@ for i in range(3):
         progress=False
     )
     print(f'Impedance at 1000 Hz: {magnitude1000[target_stream,0]:.2f} Ohm')
-    print(f'Sending 50Hz 2mA pulses for 1 second (dutycycle 50%)')
+    print(f'Sending 50Hz {current_mA}mA pulses for 1 second (dutycycle 50%)')
     run_steps = send_pulses(
         xdaq,
         stream=target_stream,
         channel=target_channel,
         duration_ms=1000,
-        pulse_current_mA=2,
+        pulse_current_mA=current_mA,
         pulse_frequency=50
     )
