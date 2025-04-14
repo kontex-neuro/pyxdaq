@@ -1,12 +1,15 @@
-from pyxdaq.xdaq import get_XDAQ
-from pyxdaq.impedance import Strategy, Frequency
-import numpy as np
 from argparse import ArgumentParser
+
+import numpy as np
 from tqdm import tqdm
+
+from pyxdaq.impedance import Frequency, Strategy
+from pyxdaq.xdaq import get_XDAQ
 
 
 def get_args():
     parser = ArgumentParser()
+    parser.add_argument('--rhs', action='store_true')
     parser.add_argument('--runs', type=int, default=10, help='Number of runs to perform')
     parser.add_argument('--output', type=str, default='res.npz', help='Output file')
     parser.add_argument(
@@ -51,6 +54,7 @@ def get_args():
 args = get_args()
 
 xdaq = get_XDAQ(rhs=True)
+print(xdaq.ports)
 
 if xdaq.numDataStream > 2:
     raise ValueError('This script is only compatible with one X3SR32 headstage')

@@ -1,13 +1,15 @@
 #%%
 from dataclasses import dataclass
 from functools import partial
-from pyxdaq.impedance import calculate_impedance, Frequency
-from pyxdaq.datablock import amplifier2mv
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib as mpl
 from typing import Tuple
+
+import matplotlib as mpl
+import matplotlib.pyplot as plt
+import numpy as np
 from tqdm.auto import tqdm
+
+from pyxdaq.datablock import amplifier2mv
+from pyxdaq.impedance import Frequency, calculate_impedance
 
 raw_data = np.load('res.npz')
 test_frequencies = raw_data['test_frequencies']

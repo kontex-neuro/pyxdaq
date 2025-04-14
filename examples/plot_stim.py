@@ -1,9 +1,10 @@
 #%%
-from pyxdaq.xdaq import get_XDAQ, XDAQ
-from pyxdaq.stim import enable_stim
-from pyxdaq.datablock import DataBlock, adc2v
-from pyxdaq.constants import *
 import numpy as np
+
+from pyxdaq.constants import *
+from pyxdaq.datablock import DataBlock, adc2v
+from pyxdaq.stim import enable_stim
+from pyxdaq.xdaq import XDAQ, get_XDAQ
 
 xdaq = get_XDAQ(rhs=True)
 

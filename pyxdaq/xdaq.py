@@ -4,91 +4,23 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial
 from typing import List, Tuple, Union
-from tqdm.auto import tqdm
 
 import numpy as np
 from dataclass_wizard import JSONWizard
+from tqdm.auto import tqdm
 
-from .board import Board, OkBoard
+from . import impedance, resources
+from .board import Board
 from .constants import *
 from .datablock import DataBlock
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
-from . import impedance
-from . import resources
 
 
 class XDAQModel(Enum):
     NA = 0
     One = 3
     Core = 1
-
-
-@dataclass
-class XDAQInfo:
-    serial: int
-    hdmi: int
-    fpga: int
-    daio: int
-    oled: int
-    vido: int
-    expr: int
-    xprt: int
-
-    rhd: int
-    rhs: int
-    din: int
-    dout: int
-    ain: int
-    aout: int
-    model: XDAQModel
-    serial_str: str
-
-    @staticmethod
-    def _parse_hdmi(hdmi):
-        return 32 * (hdmi >> 24), 16 * (hdmi >> 16 & 0xff), hdmi >> 8 & 0xff
-
-    @staticmethod
-    def _parse_fpga(fpga):
-        fpga = str(fpga)
-        v = int(fpga[8:]) - 1
-        return fpga[:4], fpga[4:6], fpga[6:8], chr(v + ord('a'))
-
-    @staticmethod
-    def _parse_daio(daio):
-        return daio >> 24, daio >> 16 & 0xff, daio >> 8 & 0xff, daio & 0xff
-
-    @classmethod
-    def from_board(cls, board: Board):
-        serial = board.GetWireOutValue(XDAQWireOut.Serial)
-        hdmi = board.GetWireOutValue(XDAQWireOut.Hdmi, False)
-        daio = board.GetWireOutValue(XDAQWireOut.Daio, False)
-        rhd, rhs, model = XDAQInfo._parse_hdmi(hdmi)
-        model = XDAQModel(model)
-        din, dout, ain, aout = XDAQInfo._parse_daio(daio)
-        return cls(
-            serial, hdmi, board.GetWireOutValue(XDAQWireOut.Fpga, False), daio,
-            board.GetWireOutValue(XDAQWireOut.Oled, False),
-            board.GetWireOutValue(XDAQWireOut.Vido, False),
-            board.GetWireOutValue(XDAQWireOut.Expr, False),
-            board.GetWireOutValue(XDAQWireOut.Xprt, False), rhd, rhs, din, dout, ain, aout, model,
-            f'{serial:X}'
-        )
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __str__(self):
-        return f"""
-Serial #:{self.serial:08x}
-HDMI    :{self.hdmi:08x}
-FPGA    :{self.fpga:08x}
-DAIO    :{self.daio:08x}
-OLED    :{self.oled:08x}
-VIDO    :{self.vido:08x}
-EXPR    :{self.expr:08x}
-XPRT    :{self.xprt:08x}
-"""
 
 
 @dataclass
@@ -251,66 +183,29 @@ def stim_params(pulses: int, shape: StimShape, start_polarity: StartPolarity):
 class XDAQ:
     dev: Board
     expander: bool = None
-    xdaqinfo: XDAQInfo = None
     spiPorts: int = 4
-    mode32DIO: bool = False
     ports: XDAQPorts = None
     debug: bool = False
     sampleRate: SampleRate = None
     rhs: bool = None
     ep: Union[RHD, RHS, None] = None
 
-    def __init__(self, debug: bool = False, dev: Board = None):
-        if dev is not None:
-            self.dev = dev
-        else:
-            self.dev = OkBoard(debug)
+    def __init__(self, dev: Board):
+        self.dev = dev
+        self.ep = RHS if self.dev.rhs else RHD
+        self.rhs = self.dev.rhs
+        self.expander = self.detect_expander()
+        self.ports = XDAQPorts.default(2, 1 if self.dev.rhs else 2, False if self.dev.rhs else True)
 
     def getreg(self, sample_rate: SampleRate) -> Union[RHDDriver, RHSDriver]:
         R = RHSDriver if self.rhs else RHDDriver
         res = resources.rhs if self.rhs else resources.rhd
         return R(sample_rate, res.reg_path, res.isa_path)
 
-    def get_xdaq_status(self) -> XDAQMCU:
-        value = self.dev.GetWireOutValue(self.ep.WireOutXDAQStatus)
-        testbit = lambda x: (value & x.value) == x.value
-        if testbit(XDAQMCU.MCU_BUSY):
-            return XDAQMCU.MCU_BUSY
-        if testbit(XDAQMCU.MCU_ERROR):
-            return XDAQMCU.MCU_ERROR
-        if testbit(XDAQMCU.MCU_DONE):
-            return XDAQMCU.MCU_DONE
-        if value == 0:
-            return XDAQMCU.MCU_IDLE
-        return XDAQMCU.MCU_BUSY
-
     def detect_expander(self):
         expanderBoardDetected = self.dev.GetWireOutValue(self.ep.ExpanderInfo) != 0
         expanderBoardIdNumber = (self.dev.GetWireOutValue(self.ep.WireOutSerialDigitalIn) >> 3) & 1
         return expanderBoardDetected, expanderBoardIdNumber
-
-    def config_fpga(self, rhs: bool = False, bitfile: str = None) -> Tuple[int, int]:
-        if bitfile is None:
-            bitfile = resources.rhs.bitfile_path if rhs else resources.rhd.bitfile_path
-        self.dev.config_fpga(bitfile)
-        self.ep = RHS if rhs else RHD
-        start = time.time()
-        while self.get_xdaq_status() == XDAQMCU.MCU_BUSY:
-            time.sleep(0.1)
-            if time.time() - start > 3:
-                raise RuntimeError('XDAQ MCU did not start in time')
-        self.rhs = rhs
-        boardId = self.dev.GetWireOutValue(self.ep.WireOutBoardId)
-        boardVersion = self.dev.GetWireOutValue(self.ep.WireOutBoardVersion, False)
-        self.reset_board()
-        self.expander = self.detect_expander()
-        self.ports = XDAQPorts.default(2, 1 if rhs else 2, False if rhs else True)
-        self.xdaqinfo = XDAQInfo.from_board(self.dev)
-        return boardId, boardVersion
-
-    def set32DIO(self, enable: bool):
-        self.mode32DIO = enable
-        self.dev.SetWireInValue(self.ep.Enable32bitDIO, 0x04 * enable, 0x04)
 
     def reset_board(self):
         """
@@ -319,9 +214,6 @@ class XDAQ:
         """
         self.dev.SetWireInValue(self.ep.WireInResetRun, 1, 1)
         self.dev.SetWireInValue(self.ep.WireInResetRun, 0, 1)
-        # usb3 configuration
-        self.dev.SendTrig(self.ep.TrigInConfig, 9, self.ep.WireInMultiUse, 1024 // 4)
-        self.dev.SendTrig(self.ep.TrigInConfig, 10, self.ep.WireInMultiUse, 32)
 
     def run(self):
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 0)
@@ -330,16 +222,10 @@ class XDAQ:
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 1)
 
     def is_running(self):
-        return self.dev.GetWireOutValue(self.ep.WireOutSpiRunning)
-
-    def numWordsInFifo(self):
-        return self.dev.GetWireOutValue(self.ep.WireOutNumWords)
+        return self.dev.GetWireOutValue(self.ep.WireOutSpiRunning) & 1
 
     def flush(self):
-        self.dev.dev.SetWireInValue(0, 1 << 17)
-        self.dev.dev.UpdateWireIns()
-        self.dev.dev.SetWireInValue(0, 0 << 17)
-        self.dev.dev.UpdateWireIns()
+        self.dev.dev.read(0xA0, bytearray())
 
     def selectAuxCommandBank(self, port: Union[int, str], auxCommandSlot, bank: int):
         """
@@ -426,6 +312,9 @@ class XDAQ:
     def setCableDelay(self, port: Union[int, str], delay: int):
         if delay < 0 or delay > 15:
             raise Exception("delay out of range")
+        if (isinstance(port, str) and port != 'all') or (isinstance(port, int) and
+                                                         (port < 0 or port > 7)):
+            raise Exception("port out of range")
 
         if isinstance(port, str) and port == 'all':
             delay = delay << 4 | delay
@@ -481,39 +370,35 @@ class XDAQ:
         # TODO: use cached value
         return sum(i.enabled for i in self.ports.streams)
 
-    def clearTTLout(self):
-        self.setTTLout('all', False)
+    def set_ttl_override(self, enable: Union[int, bool]):
+        v = enable * 0xffffffff if isinstance(enable, bool) else enable & 0xffffffff
+        self.dev.SetWireInValue(self.ep.TTL_override, v)
 
     def setTTLout(self, channel: Union[int, str], enable: Union[bool, int]):
-        if self.rhs:
-            return
         if isinstance(channel, str) and channel == 'all':
-            v = enable * 0xffff if isinstance(enable, bool) else enable & 0xffff
+            v = enable * 0xffffffff if isinstance(enable, bool) else enable & 0xffffffff
             self.dev.SetWireInValue(self.ep.WireInTtlOut, v)
-            if self.mode32DIO:
-                v = enable * 0xffff if isinstance(enable, bool) else enable >> 16
-                self.dev.SetWireInValue(self.ep.WireInTtlOut32, v)
         else:
-            ep = self.ep.WireInTtlOut if channel < 16 else self.ep.WireInTtlOut32
-            self.dev.SetWireInValue(ep, int(enable) << (channel % 16), 1 << (channel % 16))
+            self.dev.SetWireInValue(self.ep.WireInTtlOut, int(enable) << channel, 1 << channel)
 
     def _getDacEndpoint(self, dacChannel):
-        if dacChannel < 0 or dacChannel > 7:
+        if dacChannel < 0 or dacChannel > 11:
             raise ValueError("dacChannel out of range")
         return [
             self.ep.WireInDacSource1, self.ep.WireInDacSource2, self.ep.WireInDacSource3,
             self.ep.WireInDacSource4, self.ep.WireInDacSource5, self.ep.WireInDacSource6,
-            self.ep.WireInDacSource7, self.ep.WireInDacSource8
+            self.ep.WireInDacSource7, self.ep.WireInDacSource8, self.ep.WireInDacSource9,
+            self.ep.WireInDacSource10, self.ep.WireInDacSource11, self.ep.WireInDacSource12
         ][dacChannel]
 
     def enableDac(self, channel: int, enable: bool):
-        if channel < 0 or channel > 7:
+        if channel < 0 or channel > 11:
             raise ValueError("channel out of range")
         bm = 0x0200 if self.rhs else 0x0800
         self.dev.SetWireInValue(self._getDacEndpoint(channel), enable * bm, bm)
 
     def selectDacDataStream(self, channel: bool, stream: int):
-        if channel < 0 or channel > 7:
+        if channel < 0 or channel > 11:
             raise ValueError("channel out of range")
         if stream < 0 or stream > (9 if self.rhs else 33):
             raise ValueError("stream out of range")
@@ -768,7 +653,6 @@ class XDAQ:
             self.programStimReg(16, channel, StimRegister.EventEnd, 65534)
 
     def initialize(self):
-        self.reset_board()
         self.enableAuxCommandsOnAllStreams()
         self.setGlobalSettlePolicy([False, False, False, False], False)
         self.setSampleRate(SampleRate.SampleRate30000Hz)
@@ -787,7 +671,7 @@ class XDAQ:
 
         self.enableDcAmpConvert(True)
         self.setExtraStates(0)
-        self.clearTTLout()
+        self.setTTLout('all', False)
         for i in range(8):
             self.configDac(i, False, 0, 0)  # Initially point DACs to DacManual1 input
         self.setDacManual(32768)
@@ -823,7 +707,7 @@ class XDAQ:
                 self.ep.PipeInAuxCmd4
             ][auxCommandSlot]
             commandList = np.pad(commandList, (0, 16 - len(commandList) % 16), 'constant')
-            self.dev.WriteToBlockPipeIn(ep, 16, bytearray(commandList.tobytes(order='C')))
+            self.dev.WriteToBlockPipeIn(ep, bytearray(commandList.tobytes(order='C')))
         else:
             self.dev.SetWireInValue(self.ep.WireInCmdRamBank, bank)
             for i, cmd in enumerate(commandList):
@@ -858,7 +742,9 @@ class XDAQ:
         stim_params: dict = {
             'update_stim': False,
             'readonly': True
-        }
+        },
+        upper_bandwidth: float = 7500,
+        lower_bandwidth: float = 1
     ):
         reg = self.getreg(self.sampleRate)
 
@@ -875,12 +761,12 @@ class XDAQ:
 
         # Not implemented yet
         # reg.setDspCutoffFreq(0)
-        reg.set_upper_bandwidth(7500)
+        reg.set_upper_bandwidth(upper_bandwidth)
         if self.rhs:
             reg.set_lower_bandwidth_a(1000)
-            reg.set_lower_bandwidth_b(1)
+            reg.set_lower_bandwidth_b(lower_bandwidth)
         else:
-            reg.set_lower_bandwidth(1)
+            reg.set_lower_bandwidth(lower_bandwidth)
 
         if self.rhs:
             cmd = reg.createCommandListRegisterConfig(**stim_params)
@@ -911,39 +797,62 @@ class XDAQ:
 
             self.selectAuxCommandBank('all', 2, 2 if fastSettle else 1)
 
-    def changeSampleRate(self, sampleRate: SampleRate, fastSettle: bool = False):
+    def changeSampleRate(
+        self,
+        sampleRate: SampleRate,
+        fastSettle: bool = False,
+        update_stim: bool = False,
+        upper_bandwidth: float = 7500,
+        lower_bandwidth: float = 1
+    ):
         self.setSampleRate(sampleRate)
         if not self.rhs:
             self.setDacHighpassFilter(250, sampleRate.rate)
 
-        self.uploadCommands(fastSettle)
+        self.uploadCommands(
+            fastSettle, upper_bandwidth=upper_bandwidth, lower_bandwidth=lower_bandwidth
+        )
 
     @staticmethod
-    def _encodeWaveform(waveform):
+    def _encodeWaveform(waveform, from_voltage: bool = True):
         # 32768 = 2^15 = 0V
         # 10.24 V = 65535 = 2^16 - 1
-        return np.clip(waveform * 3200 + 32768, 0, 2**16 - 1).astype('<u2').tobytes(order='C')
+        if from_voltage:
+            return np.clip(waveform * 3200 + 32768, 0, 2**16 - 1).astype('<u2').tobytes(order='C')
+        else:
+            return np.clip(waveform, 0, 2**16 - 1).astype('<u2').tobytes(order='C')
 
     def _getPipeInDACendpoint(self, dacChannel: int):
-        if dacChannel < 0 or dacChannel > 7:
+        if dacChannel < 0 or dacChannel > 11:
             raise RuntimeError("dacChannel out of range")
         return [
             self.ep.PipeInDAC1, self.ep.PipeInDAC2, self.ep.PipeInDAC3, self.ep.PipeInDAC4,
-            self.ep.PipeInDAC5, self.ep.PipeInDAC6, self.ep.PipeInDAC7, self.ep.PipeInDAC8
+            self.ep.PipeInDAC5, self.ep.PipeInDAC6, self.ep.PipeInDAC7, self.ep.PipeInDAC8,
+            self.ep.PipeInDAC9, self.ep.PipeInDAC10, self.ep.PipeInDAC11, self.ep.PipeInDAC12
         ][dacChannel]
 
-    def uploadDACData(self, waveform: np.ndarray, dacChannel: int, length: int):
-        buffer = bytearray(self._encodeWaveform(waveform))
+    def uploadDACData(
+        self, waveform: np.array, dacChannel: int, length: int, from_voltage: bool = True
+    ):
+        buffer = bytearray(self._encodeWaveform(waveform, from_voltage))
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 2)
-        result = self.dev.WriteToBlockPipeIn(self._getPipeInDACendpoint(dacChannel), 16, buffer)
+        result = self.dev.WriteToBlockPipeIn(self._getPipeInDACendpoint(dacChannel), buffer)
         if result < 0:
             raise RuntimeError("Upload waveform WriteToBlockPipeIn failed")
-        self.dev.SendTrig(self.ep.TrigInSpiStart, 8 + dacChannel, self.ep.WireInMultiUse, length)
+        if dacChannel <= 7:
+            self.dev.SendTrig(
+                self.ep.TrigInSpiStart, 8 + dacChannel, self.ep.WireInMultiUse, length
+            )
+        else:
+            self.dev.register_cache[0x98 + 2 * ((dacChannel - 8) // 2)] = (
+                length << (16 * (dacChannel % 2))
+            ) | self.dev.register_cache[0x98 + 2 * ((dacChannel - 8) // 2)]
+            self.dev._update_register()
 
-    def uploadWaveform(self, waveform, channel, length):
+    def uploadWaveform(self, waveform, channel: int, length: int, from_voltage: bool = True):
 
-        self.uploadDACData(waveform, channel, length)
-        self.selectDacDataStream(channel, 33)
+        self.uploadDACData(waveform, channel, length, from_voltage)
+        self.selectDacDataStream(channel, 9 if self.rhs else 33)
         self.enableDac(channel, True)
 
     def start(self):
@@ -958,92 +867,47 @@ class XDAQ:
     def readDataToBuffer(self, buffer: bytearray):
         return self.dev.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
 
-    def pipeoutThrottle(self, enable: bool):
-        self.dev.SetWireInValue(self.ep.WireInResetRun, int(not enable) << 16, 1 << 16)
+    def runAndReadBuffer(self, samples) -> Tuple[int, bytearray]:
+        buffers = []
 
-    def disablePipeoutThrottle(self):
+        sample_size = self.getSampleSizeBytes()
+        total_size = samples * sample_size
 
-        class Context:
+        def callback(data, error):
+            if error is not None:
+                print(error, sum(map(len, buffers)), total_size, self.is_running())
+            if data is not None:
+                buffers.append(bytearray(data))
 
-            def __init__(self, dev):
-                self.dev = dev
+        self.setMaxTimeStep(0)
+        self.setContinuousRunMode(True)
+        sample_time = samples / self.getSampleRate()
+        hw_events_per_sec = 50
+        expected_data_rate = self.sampleRate.rate * sample_size
+        chunk_size = expected_data_rate / hw_events_per_sec
+        chunk_size = 2**(int(min(max(chunk_size, 2**10), 2**20)).bit_length() - 1)
 
-            def __enter__(self):
-                self.dev.pipeoutThrottle(False)
+        with self.dev.start_receiving_aligned_buffer(
+                self.ep.PipeOutData,
+                sample_size,
+                callback,
+                chunk_size=chunk_size,
+        ):
+            self.run()
+            start = time.time()
+            while sum(map(len, buffers)) < total_size:
+                if time.time() - start > (1 + sample_time):
+                    raise TimeoutError("Timeout getting samples")
+                time.sleep(0.01)
+            self.setContinuousRunMode(False)
+        self.flush()
 
-            def __exit__(self, exc_type, exc_value, traceback):
-                self.dev.pipeoutThrottle(True)
+        return b''.join(buffers)[:total_size]
 
-        return Context(self)
-
-    def discardFIFO(self):
-        self.dev.SetWireInValue(self.ep.WireInResetRun, 1 << 17, 1 << 17)
-        self.dev.SetWireInValue(self.ep.WireInResetRun, 0 << 17, 1 << 17)
-        fifo = self.numWordsInFifo() * 2
-        with self.disablePipeoutThrottle():
-            while fifo > 0:
-                tr = min(2**20, ((fifo + 1023) // 1024) * 1024)
-                n = self.readDataToBuffer(bytearray(tr))
-                fifo -= n
-
-    def runAndCleanup(self):
-
-        class Context:
-
-            def __init__(self, dev: XDAQ):
-                self.dev = dev
-
-            def __enter__(self):
-                self.dev.start()
-
-            def __exit__(self, exc_type, exc_value, traceback):
-                self.dev.stop()
-                while self.dev.is_running() > 0:
-                    time.sleep(0.01)
-                self.dev.discardFIFO()
-
-        return Context(self)
-
-    def readBuffer(self, samples) -> Tuple[int, bytearray]:
-        bs = self.getSampleSizeBytes() * samples
-        buffer = bytearray(max(((bs + 1023) // 1024) * 1024, 1024))
-        return self.readDataToBuffer(buffer), buffer
-
-    def runAndReadBuffer(self, samples, discard=False) -> Tuple[int, bytearray, None]:
-        self.resetSequencers()
-        self.setMaxTimeStep(samples)
-        self.setContinuousRunMode(False)
-        self.run()
-        while self.is_running() > 0:
-            time.sleep(0.001)
-        if discard:
-            self.discardFIFO()
-            return None
-        else:
-            return self.readBuffer(samples)
-
-    def readDataBlock(self, samples) -> DataBlock:
-        n, buffer = self.readBuffer(samples)
+    def runAndReadDataBlock(self, samples) -> DataBlock:
+        buffer = self.runAndReadBuffer(samples)
         return DataBlock.from_buffer(
-            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
-        )
-
-    def runAndReadDataBlock(self, samples: int, discard: bool = False) -> Union[DataBlock, None]:
-        """
-        Run the data acquisition and read the data after the acquisition is done.
-
-        Parameters
-        ----------
-        samples : int
-            Number of samples to acquire.
-        discard : bool
-            Not to read the data after the acquisition.
-        """
-        if discard:
-            return self.runAndReadBuffer(samples, True)
-        n, buffer = self.runAndReadBuffer(samples, False)
-        return DataBlock.from_buffer(
-            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.mode32DIO
+            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream
         )
 
     def testCableDelay(self, output: str = ''):
@@ -1077,6 +941,7 @@ class XDAQ:
                     miso,
                 )
             )
+        self.selectAuxCommandBank('all', 2, 1)
         # Find the first delay that has a valid result
         delay = np.argmax(np.stack([i[0] for i in results]), axis=0)
         # Delay x (Stream x (3,) ) -> Delay x 3 x Stream
@@ -1093,21 +958,18 @@ class XDAQ:
         return delay, *zip(*[cast(*results[delay[s]][s]) for s in range(n_streams)])
 
     def findConnectedAmplifiers(self):
-        for sample_rate in sorted(list(SampleRate), key=lambda x: x.value[2], reverse=True):
-            self.changeSampleRate(sample_rate)
-            self.ports = XDAQPorts.fromChipInfos(
-                self.testCableDelay(), 2, 1 if self.rhs else 2, not self.rhs
-            )
-            for spi, streams in enumerate(
-                    self.ports.group_by_port() if self.rhs else self.ports.group_by_spi()):
-                self.setCableDelay(spi, max(s.delay for s in streams))
-            # since ports are replaced, we need a force update to sync the enable state
-            # it could be done by copying the cached state from the old ports
-            self.enableDataStream('all', False, True)
-            for s in self.ports.streams:
-                self.enableDataStream(s.sid, s.available)
-            self.setSpiLedDisplay([any(c.available for c in p) for p in self.ports])
-            return
+        self.ports = XDAQPorts.fromChipInfos(
+            self.testCableDelay(), 2, 1 if self.rhs else 2, not self.rhs
+        )
+        for spi, streams in enumerate(
+                self.ports.group_by_port() if self.rhs else self.ports.group_by_spi()):
+            self.setCableDelay(spi, max(s.delay for s in streams))
+        # since ports are replaced, we need a force update to sync the enable state
+        # it could be done by copying the cached state from the old ports
+        self.enableDataStream('all', False, True)
+        for s in self.ports.streams:
+            self.enableDataStream(s.sid, s.available)
+        self.setSpiLedDisplay([any(c.available for c in p) for p in self.ports])
 
     def setSpiLedDisplay(self, stat: List[bool]):
         value = sum(1 << i for i, v in enumerate(stat) if v)
@@ -1116,11 +978,8 @@ class XDAQ:
     def enableDacHighpassFilter(self, enable: bool):
         self.dev.SendTrig(self.ep.TrigInConfig, 4, self.ep.WireInMultiUse, 1 if enable else 0)
 
-    def getBlockSizeBytes(self):
-        return getBlocksizeInWords(self.rhs, self.mode32DIO, 128, self.numDataStream, 32) * 2
-
     def getSampleSizeBytes(self):
-        return getBlocksizeInWords(self.rhs, self.mode32DIO, 1, self.numDataStream, 32) * 2
+        return getBlocksizeInWords(self.rhs, self.numDataStream) * 2
 
     def getSampleRate(self) -> int:
         return self.sampleRate.value[2]
@@ -1149,6 +1008,9 @@ class XDAQ:
         post_charge_recovery_ms: float
     ):
         dt = 1 / self.sampleRate.value[2]
+        if not enable:
+            amp_neg_mA = 0
+            amp_pos_mA = 0
         self.programStimReg(
             stream, channel, StimRegister.Trigger,
             stim_trigger(trigger_source, trigger, trigger_pol, enable)
@@ -1162,9 +1024,9 @@ class XDAQ:
         t3 = int(duration_phase3_ms * 1e-3 / dt) + t2
         t4 = int(duration_pulse_ms * 1e-3 / dt) + t3
         if pre_ampsettle_ms > 0:
-            t_ampsettle_on = t1 - int(pre_ampsettle_ms * 1e-3 / dt)
+            t_ampsettle_on = t0 - int(pre_ampsettle_ms * 1e-3 / dt)
         else:
-            t_ampsettle_on = t1
+            t_ampsettle_on = t0
         if post_ampsettle_ms > 0:
             t_ampsettle_off = int(post_ampsettle_ms * 1e-3 / dt) + t3
         else:
@@ -1193,6 +1055,7 @@ class XDAQ:
         self.programStimReg(stream, channel, StimRegister.EventEnd, t4)
         self.enableAuxCommandsOnOneStream(stream)
         reg = self.getreg(self.sampleRate)
+        reg.set_dsp_cutoff_freq(0.5)
         reg.setStimStepSize(step_size)
         cmd = reg.createCommandListSetStimMagnitudes(
             magnitude_neg=int(min(255, round(amp_neg_mA * 1e6 / step_size.nA))) if enable else 0,
@@ -1207,7 +1070,7 @@ class XDAQ:
             self.uploadCommandList(cmd, aux, 0)
         self.setStimCmdMode(False)
         self.enableAuxCommandsOnOneStream(stream)
-        self.runAndReadBuffer(samples=128, discard=True)
+        self.runAndReadBuffer(samples=128)
 
         reg.set_upper_bandwidth(7500)
         reg.set_lower_bandwidth_a(1000)
@@ -1216,52 +1079,21 @@ class XDAQ:
         cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=True)
         self.uploadCommandList(cmd, 0, 0)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
-        self.runAndReadBuffer(samples=128, discard=True)
+        self.runAndReadBuffer(samples=128)
 
         cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
         self.uploadCommandList(cmd, 0, 0)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
         self.enableAuxCommandsOnAllStreams()
-        self.runAndReadBuffer(samples=128, discard=True)
+        self.runAndReadBuffer(samples=128)
 
-    def measure_impedance(
+    def send_ztest_signals(
         self,
         frequency: impedance.Frequency,
         strategy: impedance.Strategy = impedance.Strategy.auto(),
         channels: List[int] = None,
         progress: bool = True,
-        raw_data_return: bool = False,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-        """
-        Measure impedance of the headstage
-
-        Parameters:
-        -----------
-        frequency: impedance.Frequency
-            Target frequency to measure the impedance in Hz. The actual frequency will be
-            adjusted to the nearest frequency that can be generated by the FPGA.
-        strategy: impedance.Strategy
-            Specify the measurement duration, see Strategy for details.
-        channels: List[int]
-            The channels to test, if None, test all channels.
-            Note that all datastreams will be tested in parallel.
-        progress: bool
-            Whether to show progress bar
-        raw_data_return: bool
-            Whether to skip the impedance calculation and return the raw measurement data instead.
-
-        Returns:
-        --------
-        When raw_data_return is False:
-
-        magnitude: np.ndarray
-            The magnitude of the impedance in Ohm, shape (n_stream, n_channel)
-        phase: np.ndarray
-            The phase of the impedance in degree, shape (n_stream, n_channel)
-        
-        When raw_data_return is True:
-        raw_data: np.ndarray
-        """
         self.setStimCmdMode(False)
         for i in range(8):
             self.enableExternalDigOut(i, False)
@@ -1275,7 +1107,7 @@ class XDAQ:
         frequency = frequency.get_actual(sample_rate)
 
         reg = self.getreg(self.sampleRate)
-        cmd = reg.createCommandListZcheckDac(frequency, 128)
+        cmd = reg.createCommandListZcheckDac(frequency, 128, 8192)
         self.uploadCommandList(cmd, 0, 1)
         self.selectAuxCommandLength(0, 0, len(cmd) - 1)
         self.selectAuxCommandBank('all', 0, 1)
@@ -1316,10 +1148,55 @@ class XDAQ:
                     data = sps.amp[:, :, :]
                 all_data[-1].append(data)
         #         0         1       2        3       4
-        #   (zscale, wave pin, signal, channel, stream)
+        #   zscale, wave pin, signal, channel, stream
+        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)
+        # offset by 3 commands delay
+        all_data = all_data[..., 3 + 2 * period:period * num_periods + 3 - period]
         # -> zscale, wave pin, stream, channel, signal
-        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)[..., :period * num_periods]
-        n_zscale, n_test_ch, n_stream, _, signal_length = all_data.shape
+        return all_data
+
+    def measure_impedance(
+        self,
+        frequency: impedance.Frequency,
+        strategy: impedance.Strategy = impedance.Strategy.auto(),
+        channels: List[int] = None,
+        progress: bool = True,
+        raw_data_return: bool = False,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Measure impedance of the headstage
+
+        Parameters:
+        -----------
+        frequency: impedance.Frequency
+            Target frequency to measure the impedance in Hz. The actual frequency will be
+            adjusted to the nearest frequency that can be generated by the FPGA.
+        strategy: impedance.Strategy
+            Specify the measurement duration, see Strategy for details.
+        channels: List[int]
+            The channels to test, if None, test all channels.
+            Note that all datastreams will be tested in parallel.
+        progress: bool
+            Whether to show progress bar
+        raw_data_return: bool
+            Whether to skip the impedance calculation and return the raw measurement data instead.
+
+        Returns:
+        --------
+        When raw_data_return is False:
+
+        magnitude: np.ndarray
+            The magnitude of the impedance in Ohm, shape (n_stream, n_channel)
+        phase: np.ndarray
+            The phase of the impedance in degree, shape (n_stream, n_channel)
+        
+        When raw_data_return is True:
+        raw_data: np.ndarray
+        """
+        headstage_channels = 16 if self.rhs else 32
+        test_channels = channels if channels is not None else list(range(headstage_channels))
+        all_data = self.send_ztest_signals(frequency, strategy, test_channels, progress)
+        n_zscale, n_test_ch, n_stream, _, _ = all_data.shape
         assert n_zscale == 3
         # extract only signals from the target channel which the testing signal is applied
         # -> target_channel, zscale, stream, signal
@@ -1332,40 +1209,21 @@ class XDAQ:
             return target_channel_data
 
         # -> zscale, stream * target_channel, signal
-        signal_to_measure = target_channel_data[..., 3 + 2 * period:3 - period].reshape(
-            (n_zscale, n_stream * n_test_ch, -1)
-        )
+        signal_to_measure = target_channel_data.reshape((n_zscale, n_stream * n_test_ch, -1))
         magnitude, phase = impedance.calculate_impedance(
             signal_to_measure,
-            sample_rate,
+            self.getSampleRate(),
             rhs=self.rhs,
-            frequency=frequency,
+            frequency=frequency.get_actual(self.getSampleRate()),
         )
 
         return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
 
 
-def get_XDAQ(
-    *,
-    rhs: bool = False,
-    bitfile: str = None,
-    fastSettle: bool = False,
-    skip_headstage: bool = False,
-    debug: bool = False
-):
-    xdaq = XDAQ(debug=debug)
-    for retry in range(2):
-        try:
-            xdaq.config_fpga(rhs, bitfile)
-            break
-        except Exception as e:
-            if retry == 1:
-                raise e
-            print(e)
-            print("retrying...")
+def get_XDAQ(*, rhs: bool = False, fastSettle: bool = False, skip_headstage: bool = False):
+    xdaq = XDAQ(Board(Board.list_devices()[0].with_mode('rhs' if rhs else 'rhd')))
     xdaq.initialize()
 
-    # Set sample rate and upload all auxiliary SPI command sequences
     xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, fastSettle)
     if skip_headstage:
         return xdaq
@@ -1375,16 +1233,14 @@ def get_XDAQ(
     return xdaq
 
 
-def getBlocksizeInWords(rhs, mode32DIO, samplesPerDataBlock, numDataStreams, channelsPerStream):
+def getBlocksizeInWords(rhs, numDataStreams):
     if rhs:
         # 4 = magic number; 2 = time stamp; 20 = (16 amp channels + 4 aux commands, each 32 bit results);
         # 4 = stim control params; 8 = DACs; 8 = ADCs; 2 = TTL in/out
-        sampleSize = 4 + 2 + numDataStreams * (2 * (16 + 4) + 4) + 8 + 8 + 2
-        return samplesPerDataBlock * sampleSize
+        sampleSize = 4 + 2 + numDataStreams * (2 * (16 + 4) + 4) + 8 + 8 + 2 + 2 + 2
+        return sampleSize
     else:
         # 4 = magic number; 2 = time stamp; 35 = (32 amp channels + 3 aux commands); 0-3 filler words; 8 = ADCs; 4 = TTL in/out
-        padding = ((numDataStreams + 2 * mode32DIO) % 4)
-        sampleSize = (
-            4 + 2 + (numDataStreams * (channelsPerStream + 3)) + padding + 8 + 2 + 2 * mode32DIO
-        )
-        return samplesPerDataBlock * sampleSize
+        padding = ((numDataStreams + 2) % 4)
+        sampleSize = (4 + 2 + (numDataStreams * (32 + 3)) + padding + 8 + 2 + 2)
+        return sampleSize

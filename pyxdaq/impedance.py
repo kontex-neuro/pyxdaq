@@ -1,9 +1,11 @@
-import numpy as np
-from dataclasses import dataclass
-import math
-from pyxdaq.datablock import amplifier2mv
-from typing import Union
 import logging
+import math
+from dataclasses import dataclass
+from typing import Union
+
+import numpy as np
+
+from pyxdaq.datablock import amplifier2mv
 
 logger = logging.getLogger(__name__)
 

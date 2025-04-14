@@ -1,5 +1,5 @@
+from .constants import StartPolarity, StimShape, StimStepSize, TriggerEvent, TriggerPolarity
 from .xdaq import XDAQ
-from .constants import StartPolarity, StimShape, TriggerEvent, TriggerPolarity, StimStepSize
 
 
 def enable_stim(

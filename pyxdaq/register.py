@@ -35,7 +35,8 @@ class Registers:
                 f'Value {value} exceeds {bits} bits when setting bits {start} to {end} of register {reg}'
             )
         mask = ((1 << bits) - 1) << start
-        self.registers[reg] = (self.registers[reg] & ~mask) | ((value << start) & mask)
+        self.registers[reg] = (self.registers[reg]
+                               & ~type(self.registers[0])(mask)) | ((value << start) & mask)
 
     def getbits(self, reg, start, *, end=None, bits=None):
         if bits is None:
@@ -163,23 +164,23 @@ class ISA(JSONWizard):
 def machinecode(opname: str, isa: ISA, registers: Registers, **kwargs):
     op = isa[opname]
     shift = isa.instruction_bits - isa.opcode_bits
-    binary = (op.opcode << shift)
+    binary = int(op.opcode << shift)
     for o in op.operands:
         shift -= o.bits
         if o.type == OperandType.ADDRESS:
             if o.name not in kwargs:
                 raise ValueError(f'Address operand {o.name} not specified')
-            binary |= kwargs[o.name] << shift
+            binary |= int(kwargs[o.name] << shift)
         elif o.type == OperandType.IMMEDIATE:
-            binary |= o.value << shift
+            binary |= int(o.value << shift)
         elif o.type == OperandType.REGISTER:
             if o.name not in kwargs:
                 raise ValueError(f'Register operand {o.name} not specified')
-            binary |= registers[kwargs[o.name]] << shift
+            binary |= int(registers[kwargs[o.name]] << shift)
         elif o.type == OperandType.VARIABLE:
             if o.name not in kwargs:
                 raise ValueError(f'Variable operand {o.name} not specified')
-            binary |= kwargs[o.name] << shift
+            binary |= int(kwargs[o.name] << shift)
         else:
             raise ValueError(f'Invalid operand type {o.type}')
 

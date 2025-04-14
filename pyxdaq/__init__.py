@@ -1,15 +1,9 @@
-from pathlib import Path
+import logging
 
-try:
-    from .okFrontPanel import ok
-except ImportError as e:
+import colorlog
 
-    class _OkMock:
-        is_mock = True
-
-        def __getattr__(self, name):
-            raise RuntimeError(
-                'Opal Kelly FrontPanel API is not installed. Please follow the instructions at README.md to install it.'
-            )
-
-    ok = _OkMock()
+handler = colorlog.StreamHandler()
+handler.setFormatter(
+    colorlog.ColoredFormatter('%(log_color)s%(asctime)s [%(levelname)s] %(name)s %(message)s')
+)
+logging.basicConfig(handlers=[handler], level=logging.INFO)

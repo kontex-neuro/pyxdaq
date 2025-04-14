@@ -1,7 +1,5 @@
 from enum import Enum
 
-FIFOMAX = 2**27
-
 
 class EndPoints(Enum):
     pass
@@ -18,14 +16,8 @@ class XDAQWireOut(EndPoints):
     Xprt = 0x36
 
 
-class XDAQMCU(Enum):
-    MCU_IDLE = 0x0
-    MCU_BUSY = 0x04
-    MCU_DONE = 0x08
-    MCU_ERROR = 0x10
-
-
 class RHD(EndPoints):
+    TTL_override = 0x1400
     WireInResetRun = 0x00
     WireInMaxTimeStep = 0x01
     WireInSerialDigitalInCntl = 0x02
@@ -52,6 +44,10 @@ class RHD(EndPoints):
     WireInDacSource6 = 0x1b
     WireInDacSource7 = 0x1c
     WireInDacSource8 = 0x1d
+    WireInDacSource9 = 0x48
+    WireInDacSource10 = 0x49
+    WireInDacSource11 = 0x4A
+    WireInDacSource12 = 0x4B
     WireInDacManual = 0x1e
     WireInMultiUse = 0x1f
     TrigInConfig = 0x40
@@ -82,10 +78,15 @@ class RHD(EndPoints):
     PipeInDAC6 = 0x95
     PipeInDAC7 = 0x96
     PipeInDAC8 = 0x97
+    PipeInDAC9 = 0x98
+    PipeInDAC10 = 0x99
+    PipeInDAC11 = 0x9A
+    PipeInDAC12 = 0x9B
     ExpanderInfo = 0x35
 
 
 class RHS(EndPoints):
+    TTL_override = 0x1400
     WireInResetRun = 0x00
     WireInMaxTimeStep = 0x01
     WireInMaxTimeStepLsb = 0x01
@@ -102,10 +103,12 @@ class RHS(EndPoints):
     WireInGlobalSettleSelect = 0x0d
     WireInAdcThreshold = 0x0f
     WireInSerialDigitalInCntl = 0x10
+    WireInTtlOut32 = 0x10
     WireInLedDisplay = 0x11
     WireInManualTriggers = 0x12
     WireInTtlOutMode = 0x13
     WireInDataStreamEn = 0x14
+    WireInTtlOut = 0x15
     WireInDacSource1 = 0x16
     WireInDacSource2 = 0x17
     WireInDacSource3 = 0x18
@@ -114,6 +117,10 @@ class RHS(EndPoints):
     WireInDacSource6 = 0x1b
     WireInDacSource7 = 0x1c
     WireInDacSource8 = 0x1d
+    WireInDacSource9 = 0x48
+    WireInDacSource10 = 0x49
+    WireInDacSource11 = 0x4A
+    WireInDacSource12 = 0x4B
     WireInDacManual = 0x1e
     WireInMultiUse = 0x1f
     TrigInConfig = 0x40
@@ -162,6 +169,10 @@ class RHS(EndPoints):
     PipeInDAC6 = 0x95
     PipeInDAC7 = 0x96
     PipeInDAC8 = 0x97
+    PipeInDAC9 = 0x98
+    PipeInDAC10 = 0x99
+    PipeInDAC11 = 0x9A
+    PipeInDAC12 = 0x9B
     ExpanderInfo = 0x35
 
 
@@ -190,7 +201,7 @@ class SampleRate(Enum):
             if sr.value[2] == rate:
                 return sr
         raise ValueError('Invalid sample rate')
-    
+
     @property
     def rate(self):
         return self.value[2]

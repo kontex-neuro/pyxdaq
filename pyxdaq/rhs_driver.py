@@ -52,23 +52,21 @@ class RHSDriver(IntanHeadstage):
     @staticmethod
     def _sample_rate_reg(sample_rate: SampleRate):
         sample_rate = sample_rate.value[2]
-        if sample_rate < 3334.0:
+        if sample_rate < 6001.0:
             return 40, 32
-        if sample_rate < 4001.0:
+        if sample_rate < 7001.0:
             return 40, 16
-        if (sample_rate < 5001.0):
+        if (sample_rate < 8751.0):
             return 40, 8
-        if (sample_rate < 6251.0):
+        if (sample_rate < 11001.0):
             return 32, 8
-        if (sample_rate < 8001.0):
+        if (sample_rate < 14001.0):
             return 26, 8
-        if (sample_rate < 10001.0):
+        if (sample_rate < 17501.0):
             return 18, 4
-        if (sample_rate < 12501.0):
+        if (sample_rate < 22001.0):
             return 16, 3
-        if (sample_rate < 15001.0):
-            return 7, 3
-        return 4, 2
+        return 5, 3
 
     @_pack_instructions
     def createCommandListRegisterConfig(self, update_stim: bool, readonly: bool):
@@ -113,8 +111,8 @@ class RHSDriver(IntanHeadstage):
         return [self.encode('dummy')] * n
 
     @_pack_instructions
-    def createCommandListZcheckDac(self, frequency: float, amplitude: float):
-        return self.get_zcheck_cmds(frequency, amplitude, 3, 8192)
+    def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
+        return self.get_zcheck_cmds(frequency, amplitude, 3, maxlength)
 
     @_pack_instructions
     def createCommandListSetStimMagnitudes(

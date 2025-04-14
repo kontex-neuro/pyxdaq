@@ -26,7 +26,7 @@ class Sample:
 
     @classmethod
     def from_buffer(
-        cls, rhs: bool, buffer: Union[bytearray, memoryview], datastreams: int, mode32DIO: bool
+        cls, rhs: bool, buffer: Union[bytearray, memoryview], datastreams: int
     ) -> 'Sample':
         """
         Deserialize a single sample from a buffer.
@@ -35,7 +35,7 @@ class Sample:
         idx = 0
         magic, ts = struct.unpack("<QI", buffer[idx:12])
         if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
-            raise ValueError(f"Invalid magic: {magic}")
+            raise ValueError(f"Invalid magic: {magic:016X}")
         idx += 12
 
         aux = np.frombuffer(
@@ -61,22 +61,23 @@ class Sample:
                 buffer[idx:], dtype=_uint16le, count=4 * datastreams
             ).reshape(4, datastreams)
             idx += 4 * datastreams * 2
+            idx += 4
 
             dac = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
             idx += 16
         else:
             stim = None
             dac = None
-            idx += 2 * ((datastreams + 2 * mode32DIO) % 4)  # padding
+            idx += 2 * ((datastreams + 2) % 4)  # padding
 
         adc = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
         idx += 16
 
-        ttlin = np.frombuffer(buffer[idx:], dtype=_uint32le if mode32DIO else _uint16le, count=1)
-        idx += 4 if mode32DIO else 2
+        ttlin = np.frombuffer(buffer[idx:], dtype=_uint32le, count=1)
+        idx += 4
 
-        ttlout = np.frombuffer(buffer[idx:], dtype=_uint32le if mode32DIO else _uint16le, count=1)
-        idx += 4 if mode32DIO else 2
+        ttlout = np.frombuffer(buffer[idx:], dtype=_uint32le, count=1)
+        idx += 4
         return cls(ts, aux, amp, adc, ttlin, ttlout, dac, stim)
 
 
@@ -93,7 +94,7 @@ class Samples(Sample):
         if self.stim is None:
             return self.aux[[32, 33, 34, 35, 36, 24, 25, 26], 2, :]
         else:
-            rom = self.aux[:, 0, :, :][59:62, :, 0]
+            rom = self.aux[:, 0, :, :][58:61, :, 0]
             aux = np.array(rom).view(np.uint8).reshape(
                 (rom.shape[0], rom.shape[1], 2)
             ).transpose(1, 0, 2).reshape((rom.shape[1], -1))
@@ -105,7 +106,7 @@ class Samples(Sample):
         if self.stim is None:
             return self.aux[19, 2, :], self.aux[23, 2, :]
         else:
-            rom = self.aux[:, 0, :, :][57:59, :, 0]
+            rom = self.aux[:, 0, :, :][56:58, :, 0]
             aux = np.array(rom).view(np.uint8).reshape(
                 (rom.shape[0], rom.shape[1], 2)
             ).transpose(1, 0, 2).reshape((rom.shape[1], -1))
@@ -122,12 +123,11 @@ class DataBlock:
 
     @classmethod
     def from_buffer(
-        cls, rhs, sample_size, buffer: Union[bytearray, memoryview], datastreams: int,
-        mode32DIO: bool
+        cls, rhs, sample_size, buffer: Union[bytearray, memoryview], datastreams: int
     ) -> 'DataBlock':
         return cls(
             [
-                Sample.from_buffer(rhs, buffer[i:i + sample_size], datastreams, mode32DIO)
+                Sample.from_buffer(rhs, buffer[i:i + sample_size], datastreams)
                 for i in range(0, len(buffer), sample_size)
             ]
         )

@@ -1,9 +1,10 @@
 #%%
-from pyxdaq.xdaq import get_XDAQ, XDAQ
-from pyxdaq.stim import enable_stim
-from pyxdaq.constants import StimStepSize, StimShape, StartPolarity, TriggerEvent, TriggerPolarity
-from pyxdaq.impedance import Frequency, Strategy
 import math
+
+from pyxdaq.constants import StartPolarity, StimShape, StimStepSize, TriggerEvent, TriggerPolarity
+from pyxdaq.impedance import Frequency, Strategy
+from pyxdaq.stim import enable_stim
+from pyxdaq.xdaq import XDAQ, get_XDAQ
 
 xdaq = get_XDAQ(rhs=True)
 

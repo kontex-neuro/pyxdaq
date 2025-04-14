@@ -1,111 +1,98 @@
+import json
+import logging
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Tuple, Union
+from typing import Callable, List
 
-from . import ok
+from pylibxdaq import pyxdaq_device
+from pylibxdaq.managers import manager_paths
+
 from .constants import EndPoints
-from .utils import DebugWrapper
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class DeviceSetup:
+    manager_path: Path
+    manager_info: dict
+    options: dict
+
+    def with_mode(self, mode: str):
+        info = deepcopy(self)
+        info.options['mode'] = mode
+        return info
 
 
 class Board:
 
-    def __init__(self, debug: Union[bool, Callable] = False):
-        raise NotImplementedError
-
-    def is_open(self) -> bool:
-        raise NotImplementedError
-
-    def GetWireOutValue(self, addr: EndPoints, update: bool = True) -> int:
-        raise NotImplementedError
-
-    def SetWireInValue(
-        self, addr: EndPoints, value: int, mask: int = 0xffffffff, update: bool = True
-    ):
-        raise NotImplementedError
-
-    def ActivateTriggerIn(self, addr: EndPoints, value: int):
-        raise NotImplementedError
-
-    def WriteToBlockPipeIn(self, epAddr: EndPoints, blockSize: int, data: bytearray):
-        raise NotImplementedError
-
-    def ReadFromBlockPipeOut(self, epAddr: EndPoints, blockSize: int, data: bytearray):
-        raise NotImplementedError
-
-    def SendTrig(
-        self, trig: EndPoints, bit: int, epAddr: EndPoints, value: int, mask: int = 0xffffffff
-    ):
-        raise NotImplementedError
-
-    def config_fpga(self, bitfile: str = None) -> Tuple[int, int]:
-        raise NotImplementedError
-
-
-class OkBoard(Board):
-    """
-    Abstract class for interacting with the okFrontPanel API.
-    """
-
-    def __init__(self, debug: Union[bool, Callable] = False, dev: ok.okCFrontPanel = None):
-        if dev is None:
-            dev = self._get_device()
-        self.dev = DebugWrapper(dev, debug) if debug else dev
-
-    def is_open(self) -> bool:
-        return self.dev.IsOpen()
-
-    def GetWireOutValue(self, addr: EndPoints, update: bool = True) -> int:
-        if update:
-            self.dev.UpdateWireOuts()
-        return self.dev.GetWireOutValue(addr.value)
-
-    def SetWireInValue(
-        self, addr: EndPoints, value: int, mask: int = 0xffffffff, update: bool = True
-    ):
-        self.dev.SetWireInValue(addr.value, value, mask)
-        if update:
-            self.dev.UpdateWireIns()
-
-    def ActivateTriggerIn(self, addr: EndPoints, value: int):
-        self.dev.ActivateTriggerIn(addr.value, value)
-
-    def WriteToBlockPipeIn(self, epAddr: EndPoints, blockSize: int, data: bytearray):
-        ret = self.dev.WriteToBlockPipeIn(epAddr.value, blockSize, data)
-        if ret < 0:
-            raise RuntimeError(f'WriteToBlockPipeIn failed with error code {ret}')
-        return ret
-
-    def ReadFromBlockPipeOut(self, epAddr: EndPoints, blockSize: int, data: bytearray):
-        ret = self.dev.ReadFromBlockPipeOut(epAddr.value, blockSize, data)
-        if ret < 0:
-            raise RuntimeError(f'ReadFromBlockPipeOut failed with error code {ret}')
-        return ret
-
-    def SendTrig(
-        self, trig: EndPoints, bit: int, epAddr: EndPoints, value: int, mask: int = 0xffffffff
-    ):
-        self.dev.SetWireInValue(epAddr.value, value, mask)
-        self.dev.UpdateWireIns()
-        self.dev.ActivateTriggerIn(trig.value, bit)
-
     @classmethod
-    def _get_device(cls) -> ok.okCFrontPanel:
-        dev = ok.okCFrontPanel()
-        supported = [ok.okPRODUCT_XEM7310A75, ok.okPRODUCT_XEM6310LX45]
-        for i in range(dev.GetDeviceCount()):
-            md, sn = dev.GetDeviceListModel(i), dev.GetDeviceListSerial(i)
-            if md in supported:
-                res = dev.OpenBySerial(sn)
-                if res != ok.okCFrontPanel.NoError:
-                    print(f'Open failed {res}')
-                    continue
-                return dev
-        raise RuntimeError('No supported device found')
+    def list_devices(cls) -> List[DeviceSetup]:
+        devices = []
+        for manager_path in manager_paths:
+            manager = pyxdaq_device.get_device_manager(str(manager_path))
+            info = manager.info()
+            for device_options in json.loads(manager.list_devices()):
+                devices.append(DeviceSetup(manager_path, info, device_options))
+        return sorted(devices, key=lambda x: str(x.options))
 
-    def config_fpga(self, bitfile: Union[str, Path]) -> Tuple[int, int]:
-        if not Path(bitfile).exists():
-            raise FileNotFoundError(f'bitfile {bitfile} not found')
-        error_code = self.dev.ConfigureFPGA(str(bitfile))
-        if error_code != ok.okCFrontPanel.NoError:
-            raise RuntimeError(f'Configure FPGA failed {error_code}')
-        if not self.dev.IsFrontPanelEnabled():
-            raise RuntimeError('FrontPanel not enabled')
+    def __init__(self, device_info: DeviceSetup):
+        manager: pyxdaq_device.DeviceManager = pyxdaq_device.get_device_manager(
+            str(device_info.manager_path)
+        )
+        self.dev = manager.create_device(json.dumps(device_info.options))
+        status = json.loads(self.dev.get_status())
+        if status['Mode'] == 'rhd':
+            self.rhs = False
+        elif status['Mode'] == 'rhs':
+            self.rhs = True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self.dev
+
+    def __getattr__(self, name: str):
+        return getattr(self.dev, name)
+
+    def GetWireOutValue(self, addr: EndPoints, update: bool = True) -> int:
+        if update:
+            return self.dev.get_register_sync(addr.value)
+        else:
+            return self.dev.get_register(addr.value)
+
+    def SetWireInValue(
+        self, addr: EndPoints, value: int, mask: int = 0xFFFFFFFF, update: bool = True
+    ):
+        if update:
+            self.dev.set_register_sync(addr.value, value, mask)
+        else:
+            self.dev.set_register(addr.value, value, mask)
+
+    def ActivateTriggerIn(self, addr: EndPoints, value: int):
+        self.dev.trigger(addr.value, value)
+
+    def WriteToBlockPipeIn(self, epAddr: EndPoints, data: bytearray):
+        return self.dev.write(epAddr.value, data)
+
+    def ReadFromBlockPipeOut(self, epAddr: EndPoints, data: bytearray):
+        return self.dev.read(epAddr.value, data)
+
+    def start_receiving_aligned_buffer(
+        self,
+        epAddr: EndPoints,
+        alignment: int,
+        callback: Callable[[pyxdaq_device.ManagedBuffer], None],
+        chunk_size: int = 0
+    ):
+        return self.dev.start_aligned_read_stream(
+            epAddr.value, alignment, callback, chunk_size=chunk_size
+        )
+
+    def SendTrig(
+        self, trig: EndPoints, bit: int, epAddr: EndPoints, value: int, mask: int = 0xFFFFFFFF
+    ):
+        self.dev.set_register_sync(epAddr.value, value, mask)
+        self.dev.trigger(trig.value, bit)
