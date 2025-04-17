@@ -1,6 +1,6 @@
 [project]
 name = "pyxdaq"
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 license-files = ["LICENSE"]
 
@@ -14,6 +14,9 @@ dependencies = [
     "tqdm",
     "matplotlib",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kontex-neuro/pyxdaq"
 
 [tool.setuptools.packages.find]
 include = ["pyxdaq", "pyxdaq.*"]
