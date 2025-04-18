@@ -1220,8 +1220,12 @@ class XDAQ:
         return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
 
 
-def get_XDAQ(*, rhs: bool = False, fastSettle: bool = False, skip_headstage: bool = False):
-    xdaq = XDAQ(Board(Board.list_devices()[0].with_mode('rhs' if rhs else 'rhd')))
+def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_headstage: bool = False):
+    devices = Board.list_devices()
+    if index >= len(devices):
+        raise IndexError(f"Device index {index} out of range (found {len(devices)} device(s))")
+
+    xdaq = XDAQ(Board(devices[index].with_mode('rhs' if rhs else 'rhd')))
     xdaq.initialize()
 
     xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, fastSettle)
