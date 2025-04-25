@@ -855,14 +855,20 @@ class XDAQ:
         self.selectDacDataStream(channel, 9 if self.rhs else 33)
         self.enableDac(channel, True)
 
-    def start(self):
-        self.setContinuousRunMode(True)
+    def start(self, *, continuous: bool = None):
+        if continuous is not None:
+            self.setContinuousRunMode(continuous)
         self.run()
 
-    def stop(self):
-        self.setContinuousRunMode(False)
+    def stop(self, *, wait: bool = False):
         self.setMaxTimeStep(0)
-        # self.flush()
+        self.setContinuousRunMode(False)
+        if wait:
+            start = time.time()
+            while self.is_running():
+                time.sleep(0.01)
+                if time.time() - start > 1:
+                    raise TimeoutError("Timeout waiting for stop")
 
     def readDataToBuffer(self, buffer: bytearray):
         return self.dev.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
@@ -882,7 +888,7 @@ class XDAQ:
         self.setMaxTimeStep(0)
         self.setContinuousRunMode(True)
         sample_time = samples / self.getSampleRate()
-        hw_events_per_sec = 50
+        hw_events_per_sec = 100
         expected_data_rate = self.sampleRate.rate * sample_size
         chunk_size = expected_data_rate / hw_events_per_sec
         chunk_size = 2**(int(min(max(chunk_size, 2**10), 2**20)).bit_length() - 1)
