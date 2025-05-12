@@ -145,7 +145,7 @@ def send_pulses(
     # Speed up the process by discarding the reading of the data block
     # It's possible to run without blocking the script, but this will require more complex logic
     # See runAndReadDataBlock function for more fine-grained control
-    xdaq.runAndReadDataBlock(run_steps, discard=True)
+    xdaq.runAndReadDataBlock(run_steps)
     xdaq.setStimCmdMode(False)
     # Stop running
 
