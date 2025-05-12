@@ -1,6 +1,6 @@
 [project]
 name = "pyxdaq"
-version = "0.1.3"
+version = "0.1.4"
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "colorlog",
     "dataclass_wizard",
-    "pylibxdaq>=0.1.7",
+    "pylibxdaq==0.2.*",
     "numpy",
     "rich",
     "tqdm",

@@ -225,7 +225,7 @@ class XDAQ:
         return self.dev.GetWireOutValue(self.ep.WireOutSpiRunning) & 1
 
     def flush(self):
-        self.dev.dev.read(0xA0, bytearray())
+        self.dev.raw.read(0xA0, bytearray())
 
     def selectAuxCommandBank(self, port: Union[int, str], auxCommandSlot, bank: int):
         """
@@ -843,11 +843,6 @@ class XDAQ:
             self.dev.SendTrig(
                 self.ep.TrigInSpiStart, 8 + dacChannel, self.ep.WireInMultiUse, length
             )
-        else:
-            self.dev.register_cache[0x98 + 2 * ((dacChannel - 8) // 2)] = (
-                length << (16 * (dacChannel % 2))
-            ) | self.dev.register_cache[0x98 + 2 * ((dacChannel - 8) // 2)]
-            self.dev._update_register()
 
     def uploadWaveform(self, waveform, channel: int, length: int, from_voltage: bool = True):
 
@@ -1231,7 +1226,7 @@ def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_heads
     if index >= len(devices):
         raise IndexError(f"Device index {index} out of range (found {len(devices)} device(s))")
 
-    xdaq = XDAQ(Board(devices[index].with_mode('rhs' if rhs else 'rhd')))
+    xdaq = XDAQ(devices[index].with_mode('rhs' if rhs else 'rhd').create())
     xdaq.initialize()
 
     xdaq.changeSampleRate(SampleRate.SampleRate30000Hz, fastSettle)
