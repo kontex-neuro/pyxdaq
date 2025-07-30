@@ -5,12 +5,12 @@ from typing import Union
 
 import numpy as np
 
-from pyxdaq.datablock import amplifier2mv
+from pyxdaq.datablock import amplifier2uv
 
 logger = logging.getLogger(__name__)
 
 
-def amplitudeOfFreqComponent(data, sample_rate, frequency):
+def amplitudeOfFreqComponent(data: np.ndarray, sample_rate: float, frequency: float):
     if len(data) % 2 != 0:
         data = data[:-1]  # Truncate the last sample for even length
 
@@ -25,7 +25,7 @@ def amplitudeOfFreqComponent(data, sample_rate, frequency):
     return r / len(data)
 
 
-def measureComplexAmplitude(ampdata: np.ndarray, sampleRate: int, frequency: float) -> np.ndarray:
+def measureComplexAmplitude(ampdata: np.ndarray, sampleRate: float, frequency: float) -> np.ndarray:
     if len(ampdata.shape) != 2:
         raise ValueError("ampdata must be in the shape (num_tests, signals)")
     # Measure real (iComponent) and imaginary (qComponent) amplitude of frequency component.
@@ -73,7 +73,7 @@ def calculate_impedance(
         raise ValueError("all_signals must be in the shape (3, tests, signals_length)")
 
     res = measureComplexAmplitude(
-        amplifier2mv(
+        amplifier2uv(
             all_signals.reshape((-1, signal_length)),
         ), sample_rate, frequency
     ).reshape((caps, tests))

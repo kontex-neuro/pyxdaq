@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm.auto import tqdm
 
-from pyxdaq.datablock import amplifier2mv
+from pyxdaq.datablock import amplifier2uv
 from pyxdaq.impedance import Frequency, calculate_impedance
 
 raw_data = np.load('res.npz')
@@ -46,8 +46,8 @@ def get_impedance(raw_measurements, sample_rate, test_frequencies, periods):
 
     return np.array(
         [
-            get_impedance_for_runs(raw_at_f, frequency, period) for raw_at_f, frequency,
-            period in tqdm(zip(raw_measurements, test_frequencies, periods))
+            get_impedance_for_runs(raw_at_f, frequency, period) for raw_at_f, frequency, period in
+            tqdm(zip(raw_measurements, test_frequencies, periods))
         ]
     )
 
@@ -300,7 +300,7 @@ def plot_test_signal_and_measured_waveform():
     )
     start, end = 2 * period, -period
     sig = raw[c[ch_idx], ch_idx, 3 + start:3 + end]
-    sig = amplifier2mv(sig) / 1000
+    sig = amplifier2uv(sig) / 1000
 
     fig, ax = plt.subplots(1, 1, figsize=(4, 2))
     cap_v, cap_u = format_unit(capacitor[c[ch_idx]])

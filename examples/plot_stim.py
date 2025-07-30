@@ -1,16 +1,13 @@
-#%%
 import numpy as np
 
 from pyxdaq.constants import *
-from pyxdaq.datablock import DataBlock, adc2v
+from pyxdaq.datablock import Samples, adc2v
 from pyxdaq.stim import enable_stim
 from pyxdaq.xdaq import XDAQ, get_XDAQ
 
 xdaq = get_XDAQ(rhs=True)
 
 print(xdaq.ports)
-
-#%%
 
 
 def pulses(mA: float, frequency: float):
@@ -35,7 +32,9 @@ def pulses(mA: float, frequency: float):
     )
 
 
-def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pulse_current_mA, pulse_frequency):
+def send_pulses(
+    xdaq: XDAQ, stream, channel, duration_ms, pulse_current_mA, pulse_frequency
+) -> Samples:
     disable_stim = enable_stim(
         xdaq=xdaq,
         stream=stream,
@@ -53,7 +52,7 @@ def send_pulses(xdaq: XDAQ, stream, channel, duration_ms, pulse_current_mA, puls
     return samples
 
 
-def plot_stim(sps: DataBlock, target_channel: int, target_stream: int):
+def plot_stim(sps: Samples, target_channel: int, target_stream: int):
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(10, 6))

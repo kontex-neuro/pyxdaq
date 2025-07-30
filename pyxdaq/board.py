@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 class BoardInfo(device.DeviceInfo):
 
     def create(self):
-        manager = pyxdaq_device.get_device_manager(str(self.manager_path))
+        manager = pyxdaq_device.get_device_manager(self.manager_path)
         raw = manager.create_device(json.dumps(self.options))
-        status = json.loads(raw.get_status())
-        info = json.loads(raw.get_info())
+        status = json.loads(raw.get_status() or '{}')
+        info = json.loads(raw.get_info() or '{}')
         return Board(self, raw, status, info, rhs=status['Mode'] == 'rhs')
 
 
@@ -30,7 +30,10 @@ class Board(device.Device):
 
     def GetWireOutValue(self, addr: EndPoints, update: bool = True) -> int:
         if update:
-            return self.raw.get_register_sync(addr.value)
+            r = self.raw.get_register_sync(addr.value)
+            if r is None:
+                raise ValueError(f"Failed to get register value for {addr.name}")
+            return r
         else:
             return self.raw.get_register(addr.value)
 
@@ -55,7 +58,7 @@ class Board(device.Device):
         self,
         epAddr: EndPoints,
         alignment: int,
-        callback: Callable[[pyxdaq_device.ManagedBuffer], None],
+        callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
         chunk_size: int = 0
     ):
         return self.raw.start_aligned_read_stream(

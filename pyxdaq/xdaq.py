@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 from dataclass_wizard import JSONWizard
@@ -97,8 +97,8 @@ class XDAQPorts(JSONWizard):
     spi_per_port: int
     chips_per_spi: int  # MOSI
     ddr: bool
-    ports: List[HdmiPort] = None
-    streams: List[StreamConfig] = None
+    ports: List[HdmiPort]
+    streams: List[StreamConfig]
     num_ports: int = 4
 
     @classmethod
@@ -182,30 +182,21 @@ def stim_params(pulses: int, shape: StimShape, start_polarity: StartPolarity):
 
 class XDAQ:
     dev: Board
-    expander: bool = None
-    spiPorts: int = 4
-    ports: XDAQPorts = None
-    debug: bool = False
-    sampleRate: SampleRate = None
-    rhs: bool = None
-    ep: Union[RHD, RHS, None] = None
+    ports: XDAQPorts
+    rhs: bool
+    ep: Union[RHD, RHS]
+    sampleRate: SampleRate = SampleRate.SampleRate30000Hz
 
     def __init__(self, dev: Board):
         self.dev = dev
         self.ep = RHS if self.dev.rhs else RHD
         self.rhs = self.dev.rhs
-        self.expander = self.detect_expander()
         self.ports = XDAQPorts.default(2, 1 if self.dev.rhs else 2, False if self.dev.rhs else True)
 
     def getreg(self, sample_rate: SampleRate) -> Union[RHDDriver, RHSDriver]:
         R = RHSDriver if self.rhs else RHDDriver
         res = resources.rhs if self.rhs else resources.rhd
         return R(sample_rate, res.reg_path, res.isa_path)
-
-    def detect_expander(self):
-        expanderBoardDetected = self.dev.GetWireOutValue(self.ep.ExpanderInfo) != 0
-        expanderBoardIdNumber = (self.dev.GetWireOutValue(self.ep.WireOutSerialDigitalIn) >> 3) & 1
-        return expanderBoardDetected, expanderBoardIdNumber
 
     def reset_board(self):
         """
@@ -235,15 +226,18 @@ class XDAQ:
                  |0123|4567|8901|2345|6789|0123|4567|8901|
         Bank for |P0  |P1  |P2  |P3  |P4  |P5  |P6  |P7  |
         """
-        if self.rhs:  # why?
+        if self.ep != RHD:
             return
         if auxCommandSlot < 0 or auxCommandSlot > 2:
             raise Exception("auxCommandSlot out of range")
         if bank < 0 or bank > 15:
             raise Exception("bank out of range")
+
         ep = [self.ep.WireInAuxCmdBank1, self.ep.WireInAuxCmdBank2,
               self.ep.WireInAuxCmdBank3][auxCommandSlot]
-        if isinstance(port, str) and port == 'all':
+        if isinstance(port, str):
+            if port != 'all':
+                raise Exception("port must be 'all' or an integer 0-7")
             # repeat bank for all 8 ports, fill in same 4 bits bank for all ports
             bank = bank << 4 | bank
             bank = bank << 8 | bank
@@ -264,7 +258,7 @@ class XDAQ:
             raise Exception("loopIndex out of range")
         if endIndex < 0 or endIndex > maxidx:
             raise Exception("endIndex out of range")
-        if self.rhs:
+        if self.ep == RHS:
             self.dev.SendTrig(
                 self.ep.TrigInAuxCmdLength, auxCommandSlot + 4, self.ep.WireInMultiUse, loopIndex
             )
@@ -294,7 +288,7 @@ class XDAQ:
         self.dev.SetWireInValue(
             self.ep.WireInDataFreqPll, 256 * sample_rate.value[0] + sample_rate.value[1]
         )
-        if self.rhs:
+        if self.ep == RHS:
             self.dev.ActivateTriggerIn(self.ep.TrigInDcmProg, 0)
         else:
             self.dev.ActivateTriggerIn(self.ep.TrigInConfig, 0)
@@ -460,7 +454,7 @@ class XDAQ:
         Set TTL output mode for channels 0-7, True for control by FPGA.
         Only RHS can set individual TTL mode.
         """
-        if self.rhs:
+        if self.ep == RHS:
             if isinstance(mode, bool):
                 val = 0xff * mode
             elif isinstance(mode, list) and len(mode) == 8:
@@ -491,7 +485,7 @@ class XDAQ:
         self.dev.SendTrig(self.ep.TrigInConfig, 7, self.ep.WireInMultiUse, channel)
 
     def enableExternalDigOut(self, port: int, enable: bool):
-        if self.rhs:
+        if self.ep != RHD:
             return
         if port < 0 or port > 7:
             raise Exception("port out of range")
@@ -500,7 +494,7 @@ class XDAQ:
     # Select which of the TTL inputs 0-15 is used to control the auxiliary digital output
     # pin of the chips connected to a particular SPI port, if external control of auxout is enabled.
     def setExternalDigOutChannel(self, port: int, channel: int):
-        if self.rhs:
+        if self.ep != RHD:
             return
         if port < 0 or port > 7:
             raise Exception("port out of range")
@@ -513,7 +507,7 @@ class XDAQ:
             raise Exception("stream out of range")
         if channel < 0 or channel > (15 if self.rhs else 31):
             raise Exception("channel out of range")
-        if self.rhs:
+        if self.ep == RHS:
             # this doesn't match the documentation, but RHX uses this implementation
             self.dev.SetWireInValue(
                 self.ep.WireInDacReref, (enable * 0x100) | (stream << 5) | channel, 0x1fff
@@ -524,17 +518,17 @@ class XDAQ:
             )
 
     def enableAuxCommandsOnAllStreams(self):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         self.dev.SetWireInValue(self.ep.WireInAuxEnable, 0xff, 0xff)
 
     def enableAuxCommandsOnOneStream(self, stream):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         self.dev.SetWireInValue(self.ep.WireInAuxEnable, 1 << stream, 0xff)
 
     def setGlobalSettlePolicy(self, settle: List[bool], global_settle: bool):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         if len(settle) != 4:
             raise Exception("settle must be a list of 4 booleans")
@@ -545,22 +539,22 @@ class XDAQ:
         """
         Enable or disable stimulation for XDAQ
         """
-        if not self.rhs:
+        if self.ep != RHS:
             return
         self.dev.SetWireInValue(self.ep.WireInStimCmdMode, enabled * 0x1, 0x1)
 
     def enableDcAmpConvert(self, enabled: bool):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         self.dev.SetWireInValue(self.ep.WireInDcAmpConvert, enabled * 0x1, 0x1)
 
     def setExtraStates(self, states: int):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         self.dev.SetWireInValue(self.ep.WireInExtraStates, states)
 
     def setAnalogInTriggerThreshold(self, threshold: float):
-        if not self.rhs:
+        if self.ep != RHS:
             return
         value = int(32768 * threshold / 10.24) + 32768
         value = max(0, min(65535, value))
@@ -700,7 +694,7 @@ class XDAQ:
             raise Exception("auxCommandSlot out of range")
         if bank < 0 or bank > 15:
             raise Exception("bank out of range")
-        if self.rhs:
+        if self.ep == RHS:
             self.dev.ActivateTriggerIn(self.ep.TrigInRamAddrReset, 0)
             ep = [
                 self.ep.PipeInAuxCmd1, self.ep.PipeInAuxCmd2, self.ep.PipeInAuxCmd3,
@@ -832,7 +826,7 @@ class XDAQ:
         ][dacChannel]
 
     def uploadDACData(
-        self, waveform: np.array, dacChannel: int, length: int, from_voltage: bool = True
+        self, waveform: np.ndarray, dacChannel: int, length: int, from_voltage: bool = True
     ):
         buffer = bytearray(self._encodeWaveform(waveform, from_voltage))
         self.dev.ActivateTriggerIn(self.ep.TrigInSpiStart, 2)
@@ -868,7 +862,7 @@ class XDAQ:
     def readDataToBuffer(self, buffer: bytearray):
         return self.dev.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
 
-    def runAndReadBuffer(self, samples) -> Tuple[int, bytearray]:
+    def runAndReadBuffer(self, samples) -> bytes:
         buffers = []
 
         sample_size = self.getSampleSizeBytes()
@@ -1092,7 +1086,7 @@ class XDAQ:
         self,
         frequency: impedance.Frequency,
         strategy: impedance.Strategy = impedance.Strategy.auto(),
-        channels: List[int] = None,
+        channels: Optional[List[int]] = None,
         progress: bool = True,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         self.setStimCmdMode(False)
@@ -1160,7 +1154,7 @@ class XDAQ:
         self,
         frequency: impedance.Frequency,
         strategy: impedance.Strategy = impedance.Strategy.auto(),
-        channels: List[int] = None,
+        channels: Optional[List[int]] = None,
         progress: bool = True,
         raw_data_return: bool = False,
     ) -> Tuple[np.ndarray, np.ndarray]:
