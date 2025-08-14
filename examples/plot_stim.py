@@ -87,16 +87,17 @@ def plot_stim(sps: Samples, target_channel: int, target_stream: int):
     plt.show()
 
 
-target_stream = 0
-target_channel = 0
+if __name__ == "__main__":
+    target_stream = 0
+    target_channel = 0
 
-samples = send_pulses(
-    xdaq,
-    stream=target_stream,
-    channel=target_channel,
-    duration_ms=1000,
-    pulse_current_mA=1,
-    pulse_frequency=10
-)
+    samples = send_pulses(
+        xdaq,
+        stream=target_stream,
+        channel=target_channel,
+        duration_ms=1000,
+        pulse_current_mA=1,
+        pulse_frequency=10
+    )
 
-plot_stim(samples, target_channel, target_stream)
+    plot_stim(samples, target_channel, target_stream)
