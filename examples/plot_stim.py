@@ -1,35 +1,13 @@
 import numpy as np
 
-from pyxdaq.constants import *
+from pyxdaq.constants import RHS
 from pyxdaq.datablock import Samples, adc2v
-from pyxdaq.stim import enable_stim
+from pyxdaq.stim import enable_stim, pulses
 from pyxdaq.xdaq import XDAQ, get_XDAQ
 
 xdaq = get_XDAQ(rhs=True)
 
 print(xdaq.ports)
-
-
-def pulses(mA: float, frequency: float):
-    phase_period_ms = 1e3 / frequency / 3
-    return (lambda **kwargs: kwargs)(
-        polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
-        shape=StimShape.Biphasic,
-        delay_ms=0,
-        phase1_ms=phase_period_ms,
-        phase2_ms=phase_period_ms,
-        phase3_ms=0,
-        amp_neg_mA=mA,
-        amp_pos_mA=mA,
-        pre_ampsettle_ms=0,
-        post_ampsettle_ms=phase_period_ms,
-        post_charge_recovery_ms=0,
-        pulses=1,
-        post_pulse_ms=phase_period_ms,
-        trigger=TriggerEvent.Level,
-        trigger_pol=TriggerPolarity.High,
-        step_size=StimStepSize.StimStepSize10uA,
-    )
 
 
 def send_pulses(
