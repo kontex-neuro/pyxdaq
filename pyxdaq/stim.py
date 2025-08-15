@@ -101,6 +101,21 @@ def enable_stim(
 
 
 def pulses(mA: float, frequency: float):
+    """
+    Create a biphasic pulse
+             |---------|                   |---------|
+             |         |                   |         |
+    ---------|         |         |---------|         |
+                       |         |                   |
+                       |---------|                   |---------
+    |-delay--|                             |
+             |-phase1--|                   |-phase1--| ...
+                       |-phase2--|         |
+                                 | post    |
+                                   pulse   |
+
+    |-----------------period---------------| = 1/frequency
+    """
     phase_period_ms = 1e3 / frequency / 3
     return (lambda **kwargs: kwargs)(
         polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
