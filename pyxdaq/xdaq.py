@@ -3,7 +3,7 @@ import time
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Callable
 
 import numpy as np
 from dataclass_wizard import JSONWizard
@@ -15,6 +15,8 @@ from .constants import *
 from .datablock import DataBlock
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
+
+from pylibxdaq import pyxdaq_device
 
 
 class XDAQModel(Enum):
@@ -845,11 +847,15 @@ class XDAQ:
         self.enableDac(channel, True)
 
     def start(self, *, continuous: bool = None):
+        if self.rhs:
+            self.setStimCmdMode(True)
         if continuous is not None:
             self.setContinuousRunMode(continuous)
         self.run()
 
     def stop(self, *, wait: bool = False):
+        if self.rhs:
+            self.setStimCmdMode(False)
         self.setMaxTimeStep(0)
         self.setContinuousRunMode(False)
         if wait:
@@ -903,6 +909,21 @@ class XDAQ:
         buffer = self.runAndReadBuffer(samples)
         return DataBlock.from_buffer(
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream
+        )
+
+    def start_receiving_aligned_buffer(
+        self,
+        alignment: int,
+        callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
+    ):
+        sample_size = self.getSampleSizeBytes()
+        sample_rate = self.getSampleRate()
+
+        hardware_events_per_sec = 100
+        chunk_size = int(sample_size * sample_rate / hardware_events_per_sec)
+
+        return self.dev.start_receiving_aligned_buffer(
+            self.ep.PipeOutData, alignment, callback, chunk_size=chunk_size
         )
 
     def testCableDelay(self, output: str = ''):
