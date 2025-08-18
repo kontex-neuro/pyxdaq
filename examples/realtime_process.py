@@ -42,7 +42,7 @@ num_streams = xdaq.numDataStream
 start_time = time.time()
 
 
-def on_data_received(data: bytes, error: Exception):
+def on_data_received(data: bytes, error: str):
     """
     Called in a dedicated thread whenever a data frame arrives.
 

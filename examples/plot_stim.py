@@ -1,35 +1,13 @@
 import numpy as np
 
-from pyxdaq.constants import *
+from pyxdaq.constants import RHS
 from pyxdaq.datablock import Samples, adc2v
-from pyxdaq.stim import enable_stim
+from pyxdaq.stim import enable_stim, pulses
 from pyxdaq.xdaq import XDAQ, get_XDAQ
 
 xdaq = get_XDAQ(rhs=True)
 
 print(xdaq.ports)
-
-
-def pulses(mA: float, frequency: float):
-    phase_period_ms = 1e3 / frequency / 3
-    return (lambda **kwargs: kwargs)(
-        polarity=StartPolarity.cathodic if mA < 0 else StartPolarity.anodic,
-        shape=StimShape.Biphasic,
-        delay_ms=0,
-        phase1_ms=phase_period_ms,
-        phase2_ms=phase_period_ms,
-        phase3_ms=0,
-        amp_neg_mA=mA,
-        amp_pos_mA=mA,
-        pre_ampsettle_ms=0,
-        post_ampsettle_ms=phase_period_ms,
-        post_charge_recovery_ms=0,
-        pulses=1,
-        post_pulse_ms=phase_period_ms,
-        trigger=TriggerEvent.Level,
-        trigger_pol=TriggerPolarity.High,
-        step_size=StimStepSize.StimStepSize10uA,
-    )
 
 
 def send_pulses(
@@ -87,16 +65,17 @@ def plot_stim(sps: Samples, target_channel: int, target_stream: int):
     plt.show()
 
 
-target_stream = 0
-target_channel = 0
+if __name__ == "__main__":
+    target_stream = 0
+    target_channel = 0
 
-samples = send_pulses(
-    xdaq,
-    stream=target_stream,
-    channel=target_channel,
-    duration_ms=1000,
-    pulse_current_mA=1,
-    pulse_frequency=10
-)
+    samples = send_pulses(
+        xdaq,
+        stream=target_stream,
+        channel=target_channel,
+        duration_ms=1000,
+        pulse_current_mA=1,
+        pulse_frequency=10
+    )
 
-plot_stim(samples, target_channel, target_stream)
+    plot_stim(samples, target_channel, target_stream)

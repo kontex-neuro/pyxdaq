@@ -15,14 +15,15 @@ class BoardInfo(device.DeviceInfo):
     def create(self):
         manager = pyxdaq_device.get_device_manager(self.manager_path)
         raw = manager.create_device(json.dumps(self.options))
-        status = json.loads(raw.get_status() or '{}')
-        info = json.loads(raw.get_info() or '{}')
-        return Board(self, raw, status, info, rhs=status['Mode'] == 'rhs')
+        status = json.loads(raw.get_status() or "{}")
+        info = json.loads(raw.get_info() or "{}")
+        return Board(self, raw, status, info, rhs=status["Mode"] == "rhs")
 
 
 @dataclass
 class Board(device.Device):
     rhs: bool
+    receiving_stream: bool = False
 
     @staticmethod
     def list_devices() -> List[BoardInfo]:
@@ -59,14 +60,38 @@ class Board(device.Device):
         epAddr: EndPoints,
         alignment: int,
         callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
-        chunk_size: int = 0
+        chunk_size: int = 0,
     ):
-        return self.raw.start_aligned_read_stream(
-            epAddr.value, alignment, callback, chunk_size=chunk_size
+        if self.receiving_stream:
+            raise RuntimeError("Already receiving a stream")
+
+        class SingleStream:
+            def __init__(self, board, stream):
+                self.board = board
+                self.stream = stream
+
+            def __enter__(self):
+                self.board.receiving_stream = True
+                return self.stream.__enter__()
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.stream.__exit__(exc_type, exc_value, traceback)
+                self.board.receiving_stream = False
+
+        return SingleStream(
+            self,
+            self.raw.start_aligned_read_stream(
+                epAddr.value, alignment, callback, chunk_size=chunk_size
+            ),
         )
 
     def SendTrig(
-        self, trig: EndPoints, bit: int, epAddr: EndPoints, value: int, mask: int = 0xFFFFFFFF
+        self,
+        trig: EndPoints,
+        bit: int,
+        epAddr: EndPoints,
+        value: int,
+        mask: int = 0xFFFFFFFF,
     ):
         self.raw.set_register_sync(epAddr.value, value, mask)
         self.raw.trigger(trig.value, bit)
