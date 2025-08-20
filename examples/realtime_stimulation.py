@@ -2,21 +2,12 @@ import signal
 import time
 import numpy as np
 
-from pyxdaq.datablock import DataBlock, amplifier2uv
+from pyxdaq.datablock import amplifier2uv
 from pyxdaq.xdaq import get_XDAQ
 from pyxdaq.stim import enable_stim, pulses
 
 
 xdaq = get_XDAQ(rhs=True)
-num_streams = xdaq.numDataStream
-frame_size = xdaq.getSampleSizeBytes()
-sample_rate = xdaq.getSampleRate()
-print(
-    f"Frame size: {frame_size} bytes @ {sample_rate} Hz = "
-    f"{frame_size * sample_rate / 1e6:.2f} MB/s"
-)
-
-
 is_running = True
 
 
@@ -50,22 +41,21 @@ def on_data_received(data: bytes, error: str):
 
     buffer = bytearray(data)
     length = len(buffer)
-    if length % frame_size != 0:
-        if is_running:
-            print(f"[Warning] invalid frame length {length}")
-        else:
-            # invalid frame length, could be the last data chunk.
-            pass
+    # Error check: if not running, it could be the last data chunk.
+    if not is_running:
+        print(f"[Warning] invalid frame length {length}")
         return
 
-    block = DataBlock.from_buffer(xdaq.rhs, frame_size, buffer, num_streams)
-    samples = block.to_samples()
+    # Parse: convert buffer to samples
+    samples = xdaq.buffer_to_samples(buffer)
 
-    amp_uv = amplifier2uv(samples.amp[:, 1, 0, 1])
-    # samples.amp[:, 0, :, :] = Channel 0
-    # samples.amp[:, 1, :, :] = Channel 1
-    # samples.amp[:, :, :, 0] = DC low-gain amplifier
-    # samples.amp[:, :, :, 1] = AC high-gain amplifier
+    amp_uv = amplifier2uv(samples.amp[:, 1, target_stream, 1])
+    # Shape: [n_samples, channels, datastreams]           for RHD;
+    #        [n_samples, channels, datastreams, [DC, AC]] for RHS
+    #   n_samples: number of samples
+    #    channels: number of channels per datastream (32 for RHD, 16 for RHS)
+    # datastreams: number of datastreams (depends on type and numbers of attached headstages)
+    #    [DC, AC]: DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain
 
     # Replace the following condition to trigger stimulation
     # Here is an example of triggering stimulation when the maximum amplitude exceeds 500 μV
@@ -73,26 +63,28 @@ def on_data_received(data: bytes, error: str):
     uv_threshold = 500
 
     if max_amp > uv_threshold:
-        # Enable stimulation
+        # Enable manual trigger
         xdaq.manual_trigger(0, True)
         print(f"Stim triggered at Timestep:{samples.ts[0]:8d}")
-        # Disable stimulation
+        # Disable manual trigger
         xdaq.manual_trigger(0, False)
 
 
 # Enable stimulation needs to be done BEFORE acquisition
 # Here is an example of enabling stimulation on stream 0, channel 0, with a 10 Hz pulse at 1 mA
+target_stream = 0
+# Call disable_stim at the end of action to prevent unintended stimulation
 disable_stim = enable_stim(
     xdaq=xdaq,
-    stream=0,
+    stream=target_stream,
     channel=0,
     trigger_source=24,
     **pulses(mA=1, frequency=10),
 )
 
+print("Starting XDAQ acquisition...")
 # Use the aligned-buffer context to start/stop the callback queue
-with xdaq.start_receiving_aligned_buffer(
-    frame_size,
+with xdaq.start_receiving_buffer(
     on_data_received,
 ):
     # Kick off acquisition
