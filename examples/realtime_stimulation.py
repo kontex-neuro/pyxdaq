@@ -76,17 +76,17 @@ def on_data_received(data: bytes, error: str):
     uv_threshold = 500
 
     if max_amp > uv_threshold:
-        # Enable stimulation
+        # Enable manual trigger
         xdaq.manual_trigger(0, True)
         print(f"Stim triggered at Timestep:{samples.ts[0]:8d}")
-        # Disable stimulation
+        # Disable manual trigger
         xdaq.manual_trigger(0, False)
 
 
 # Enable stimulation needs to be done BEFORE acquisition
 # Here is an example of enabling stimulation on stream 0, channel 0, with a 10 Hz pulse at 1 mA
 target_stream = 0
-
+# Call disable_stim at the end of action to prevent unintended stimulation
 disable_stim = enable_stim(
     xdaq=xdaq,
     stream=target_stream,
