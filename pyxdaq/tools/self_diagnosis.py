@@ -125,7 +125,7 @@ def check_xdaq(console: Console, device):
             xdaq = XDAQ(board)
             xdaq.initialize()
             xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
-            xdaq.findConnectedAmplifiers()
+            xdaq.find_connected_headstages()
 
             tb = Table(
                 show_header=True,
@@ -157,7 +157,7 @@ def check_xdaq(console: Console, device):
             xdaq = XDAQ(board)
             xdaq.initialize()
             xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
-            xdaq.findConnectedAmplifiers()
+            xdaq.find_connected_headstages()
 
             tb = Table(
                 show_header=True,

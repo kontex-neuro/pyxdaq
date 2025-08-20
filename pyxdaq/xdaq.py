@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from . import impedance, resources
 from .board import Board
 from .constants import *
-from .datablock import DataBlock
+from .datablock import DataBlock, Samples
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
 
@@ -911,9 +911,8 @@ class XDAQ:
             self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream
         )
 
-    def start_receiving_aligned_buffer(
+    def start_receiving_buffer(
         self,
-        alignment: int,
         callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
     ):
         sample_size = self.getSampleSizeBytes()
@@ -923,7 +922,7 @@ class XDAQ:
         chunk_size = int(sample_size * sample_rate / hardware_events_per_sec)
 
         return self.dev.start_receiving_aligned_buffer(
-            self.ep.PipeOutData, alignment, callback, chunk_size=chunk_size
+            self.ep.PipeOutData, sample_size, callback, chunk_size=chunk_size
         )
 
     def testCableDelay(self, output: str = ''):
@@ -973,7 +972,7 @@ class XDAQ:
         # lookup the detected chip at valid delay for each non ddr stream
         return delay, *zip(*[cast(*results[delay[s]][s]) for s in range(n_streams)])
 
-    def findConnectedAmplifiers(self):
+    def find_connected_headstages(self):
         self.ports = XDAQPorts.fromChipInfos(
             self.testCableDelay(), 2, 1 if self.rhs else 2, not self.rhs
         )
@@ -1235,6 +1234,13 @@ class XDAQ:
 
         return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
 
+    def buffer_to_samples(self, buffer: bytes) -> Samples:
+        sample_size = self.getSampleSizeBytes()
+        n_streams = self.numDataStream
+        block = DataBlock.from_buffer(self.rhs, sample_size, buffer, n_streams)
+        samples = block.to_samples()
+        return samples
+    
 
 def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_headstage: bool = False):
     devices = Board.list_devices()
@@ -1248,7 +1254,7 @@ def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_heads
     if skip_headstage:
         return xdaq
 
-    xdaq.findConnectedAmplifiers()
+    xdaq.find_connected_headstages()
     xdaq.calibrateADC(fastSettle)
     return xdaq
 

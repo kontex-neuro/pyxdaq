@@ -2,21 +2,12 @@ import signal
 import time
 import numpy as np
 
-from pyxdaq.datablock import DataBlock, amplifier2uv
+from pyxdaq.datablock import amplifier2uv
 from pyxdaq.xdaq import get_XDAQ
 from pyxdaq.stim import enable_stim, pulses
 
 
 xdaq = get_XDAQ(rhs=True)
-num_streams = xdaq.numDataStream
-frame_size = xdaq.getSampleSizeBytes()
-sample_rate = xdaq.getSampleRate()
-print(
-    f"Frame size: {frame_size} bytes @ {sample_rate} Hz = "
-    f"{frame_size * sample_rate / 1e6:.2f} MB/s"
-)
-
-
 is_running = True
 
 
@@ -50,17 +41,13 @@ def on_data_received(data: bytes, error: str):
 
     buffer = bytearray(data)
     length = len(buffer)
-    if length % frame_size != 0:
-        if is_running:
-            print(f"[Warning] invalid frame length {length}")
-        else:
-            # invalid frame length, could be the last data chunk.
-            pass
+    # Error check: if not running, it could be the last data chunk.
+    if not is_running:
+        print(f"[Warning] invalid frame length {length}")
         return
 
-    # Parse: convert bytes → samples
-    block = DataBlock.from_buffer(xdaq.rhs, frame_size, buffer, num_streams)
-    samples = block.to_samples()
+    # Parse: convert buffer to samples
+    samples = xdaq.buffer_to_samples(buffer)
 
     amp_uv = amplifier2uv(samples.amp[:, 1, target_stream, 1])
     # Shape: [n_samples, channels, datastreams]           for RHD;
@@ -95,9 +82,9 @@ disable_stim = enable_stim(
     **pulses(mA=1, frequency=10),
 )
 
+print("Starting XDAQ acquisition...")
 # Use the aligned-buffer context to start/stop the callback queue
-with xdaq.start_receiving_aligned_buffer(
-    frame_size,
+with xdaq.start_receiving_buffer(
     on_data_received,
 ):
     # Kick off acquisition
