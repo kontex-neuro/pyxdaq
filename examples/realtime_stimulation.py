@@ -58,14 +58,17 @@ def on_data_received(data: bytes, error: str):
             pass
         return
 
+    # Parse: convert bytes → samples
     block = DataBlock.from_buffer(xdaq.rhs, frame_size, buffer, num_streams)
     samples = block.to_samples()
 
-    amp_uv = amplifier2uv(samples.amp[:, 1, 0, 1])
-    # samples.amp[:, 0, :, :] = Channel 0
-    # samples.amp[:, 1, :, :] = Channel 1
-    # samples.amp[:, :, :, 0] = DC low-gain amplifier
-    # samples.amp[:, :, :, 1] = AC high-gain amplifier
+    amp_uv = amplifier2uv(samples.amp[:, 1, target_stream, 1])
+    # Shape: [n_samples, channels, datastreams]           for RHD;
+    #        [n_samples, channels, datastreams, [DC, AC]] for RHS
+    #   n_samples: number of samples
+    #    channels: number of channels per datastream (32 for RHD, 16 for RHS)
+    # datastreams: number of datastreams (depends on type and numbers of attached headstages)
+    #    [DC, AC]: DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain
 
     # Replace the following condition to trigger stimulation
     # Here is an example of triggering stimulation when the maximum amplitude exceeds 500 μV
@@ -82,9 +85,11 @@ def on_data_received(data: bytes, error: str):
 
 # Enable stimulation needs to be done BEFORE acquisition
 # Here is an example of enabling stimulation on stream 0, channel 0, with a 10 Hz pulse at 1 mA
-disable_stim = enable_stim(
+target_stream = 0
+
+toggle_stim = enable_stim(
     xdaq=xdaq,
-    stream=0,
+    stream=target_stream,
     channel=0,
     trigger_source=24,
     **pulses(mA=1, frequency=10),
@@ -107,5 +112,5 @@ with xdaq.start_receiving_aligned_buffer(
     # Callback may still run until we exit this block
 
 # Disable stimulation AFTER acquisition
-disable_stim()
+toggle_stim()
 print("\nExiting...")

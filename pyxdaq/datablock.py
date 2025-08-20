@@ -127,8 +127,16 @@ class Samples(Sample):
             Type: 16-bit unsigned integer
             Shape: [n_samples, 3, datastreams] for RHD; [n_samples, 4, datastreams, 2] for RHS
         amp: Headstage amplifier channels
+            | Dimension   | Range | Range | Description                                                               |
+            | Headstage   |  RHD  |  RHS  |                                                                           |
+            |-------------|-------|-------|---------------------------------------------------------------------------|
+            | n_samples   | N     | N     | Number of samples                                                         |
+            | channels    | 32    | 16    | Number of channels per datastream                                         |
+            | datastreams | S     | S     | Number of datastreams: depends on type and numbers of attached headstages |
+            | [DC, AC]    | None  | 2     | DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain       |
             Type: 16-bit unsigned integer
-            Shape: [n_samples, 32, datastreams] for RHD; [n_samples, 16, datastreams, 2] for RHS
+            Shape: [n_samples, channels, datastreams]           for RHD; 
+                   [n_samples, channels, datastreams, [DC, AC]] for RHS
         adc: Analog input channels
             Type: 16-bit unsigned integer
             Shape: [n_samples, 8]
