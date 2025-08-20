@@ -87,7 +87,7 @@ def on_data_received(data: bytes, error: str):
 # Here is an example of enabling stimulation on stream 0, channel 0, with a 10 Hz pulse at 1 mA
 target_stream = 0
 
-toggle_stim = enable_stim(
+disable_stim = enable_stim(
     xdaq=xdaq,
     stream=target_stream,
     channel=0,
@@ -112,5 +112,5 @@ with xdaq.start_receiving_aligned_buffer(
     # Callback may still run until we exit this block
 
 # Disable stimulation AFTER acquisition
-toggle_stim()
+disable_stim()
 print("\nExiting...")
