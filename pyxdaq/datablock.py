@@ -13,11 +13,11 @@ _RHS_HEADER_MAGIC = 0x8D542C8A49712F0B
 @dataclass
 class Sample:
     """
-    Represents a single sample at time `ts` from the XDAQ data stream.
+    Represents a single sample at time `sample_index` from the XDAQ data stream.
     Headstages can vary in data streams and channels.
 
     Attributes:
-        ts: Acquisition sample count / timestep / timestamp
+        sample_index: Acquisition sample count / timestep / timestamp
             Type: 32-bit unsigned integer
             Shape: scalar
         aux: Auxiliary data channels from the headstage
@@ -26,6 +26,8 @@ class Sample:
         amp: Headstage amplifier channels
             Type: 16-bit unsigned integer
             Shape: [32, datastreams] for RHD; [16, datastreams, 2] for RHS
+        timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
+            Type: 64-bit unsigned integer or None
         adc: Analog input channels
             Type: 16-bit unsigned integer
             Shape: [8]
@@ -43,9 +45,10 @@ class Sample:
             Shape: [4, datastreams] (None for RHD)
     """
 
-    ts: Union[int, np.ndarray]
+    sample_index: Union[int, np.ndarray]
     aux: np.ndarray
     amp: np.ndarray
+    timestamp: Union[None, int, np.ndarray]
     adc: np.ndarray
     ttlin: np.ndarray
     ttlout: np.ndarray
@@ -54,7 +57,8 @@ class Sample:
 
     @classmethod
     def from_buffer(
-        cls, rhs: bool, buffer: Union[bytes, bytearray, memoryview], datastreams: int
+        cls, rhs: bool, buffer: Union[bytes, bytearray, memoryview], datastreams: int,
+        device_timestamp: bool
     ) -> "Sample":
         """
         Deserialize a single sample from a buffer, preserving original memory
@@ -62,7 +66,7 @@ class Sample:
         partial-buffer handling.
         """
         idx = 0
-        magic, ts = struct.unpack("<QI", buffer[idx:12])
+        magic, sample_index = struct.unpack("<QI", buffer[idx:12])
         if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
             raise ValueError(f"Invalid magic number: {magic:016X}")
         idx += 12
@@ -102,7 +106,11 @@ class Sample:
             stim = None
             dac = None
             idx += 2 * ((datastreams + 2) % 4)  # padding
-
+        if device_timestamp:
+            timestamp = struct.unpack("<Q", buffer[idx:idx + 8])[0]
+            idx += 8
+        else:
+            timestamp = None
         adc = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
         idx += 16
 
@@ -111,7 +119,7 @@ class Sample:
 
         ttlout = np.frombuffer(buffer[idx:], dtype=_uint32le, count=1)
         idx += 4
-        return cls(ts, aux, amp, adc, ttlin, ttlout, dac, stim)
+        return cls(sample_index, aux, amp, timestamp, adc, ttlin, ttlout, dac, stim)
 
 
 @dataclass
@@ -120,7 +128,7 @@ class Samples(Sample):
     Collection of samples; first dimension is sample index.
 
     Attributes:
-        ts: Acquisition sample counts / timesteps / timestamps
+        sample_index: Acquisition sample counts / timesteps / timestamps
             Type: 32-bit unsigned integer
             Shape: [n_samples]
         aux: Auxiliary data channels from the headstage
@@ -137,6 +145,9 @@ class Samples(Sample):
             Type: 16-bit unsigned integer
             Shape: [n_samples, channels, datastreams]           for RHD; 
                    [n_samples, channels, datastreams, [DC, AC]] for RHS
+        timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
+            Type: 64-bit unsigned integer or None
+            Shape: [n_samples] or None
         adc: Analog input channels
             Type: 16-bit unsigned integer
             Shape: [n_samples, 8]
@@ -202,11 +213,12 @@ class DataBlock:
 
     @classmethod
     def from_buffer(
-        cls, rhs, sample_size, buffer: Union[bytes, bytearray, memoryview], datastreams: int
+        cls, rhs, sample_size, buffer: Union[bytes, bytearray, memoryview], datastreams: int,
+        device_timestamp: bool
     ) -> "DataBlock":
         return cls(
             [
-                Sample.from_buffer(rhs, buffer[i:i + sample_size], datastreams)
+                Sample.from_buffer(rhs, buffer[i:i + sample_size], datastreams, device_timestamp)
                 for i in range(0, len(buffer), sample_size)
             ]
         )
@@ -216,9 +228,11 @@ class DataBlock:
         Concatenate samples into a Samples object, discarding original memory layout.
         """
         return Samples(
-            np.array([s.ts for s in self.samples]),
+            np.array([s.sample_index for s in self.samples]),
             np.stack([s.aux for s in self.samples]),
             np.stack([s.amp for s in self.samples]),
+            None
+            if self.samples[0].timestamp is None else np.stack([s.timestamp for s in self.samples]),
             np.stack([s.adc for s in self.samples]),
             np.stack([s.ttlin for s in self.samples]),
             np.stack([s.ttlout for s in self.samples]),

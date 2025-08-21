@@ -1,7 +1,6 @@
 import signal
 import time
 
-from pyxdaq.datablock import DataBlock
 from pyxdaq.xdaq import get_XDAQ
 
 is_running = True
@@ -30,16 +29,14 @@ print(
 
 xdaq.setContinuousRunMode(True)
 
-# Performance tuning parameters
-hardware_events_per_sec = 100
 bytes_per_sec = frame_size * sample_rate
-# You may pass any integer here; the driver will round to a valid power-of-two chunk
-chunk_size = int(bytes_per_sec / hardware_events_per_sec)
 
 total_bytes_received = 0
 recent_events = []
 num_streams = xdaq.numDataStream
 start_time = time.time()
+
+current_error = None
 
 
 def on_data_received(data: bytes, error: str):
@@ -51,12 +48,12 @@ def on_data_received(data: bytes, error: str):
     It's OK to compute here as long as it keep up with the target rate.
 
     CALLBACK LIFETIME: even after xdaq.stop(), this callback may still be
-    invoked until exit the start_receiving_aligned_buffer context.
+    invoked until exit the start_receiving_buffer context.
     """
-    global total_bytes_received, recent_events
+    global total_bytes_received, recent_events, current_error
 
     if error:
-        print(f"[XDAQ error] {error}")
+        current_error = error
         return
 
     if not data:
@@ -73,8 +70,11 @@ def on_data_received(data: bytes, error: str):
         return
 
     # Parse: convert bytes → samples
-    block = DataBlock.from_buffer(xdaq.rhs, frame_size, buffer, num_streams)
-    samples = block.to_samples()
+    try:
+        samples = xdaq.buffer_to_samples(buffer)
+    except ValueError as e:
+        current_error = str(e)
+        return
 
     # Update throughput stats
     total_bytes_received += length
@@ -89,28 +89,30 @@ def on_data_received(data: bytes, error: str):
     recent_rate = sum(e[0] for e in recent_events) * 199 / 200 / window
 
     print(
-        f"Chunk: {length:8d} B | "
-        f"Timestep: {samples.ts[0]:8d} | "
-        f"Recent: {recent_rate/1e6:5.2f} MB/s | "
-        f"Avg: {avg_rate/1e6:5.2f} MB/s",
+        f"Chunk: {length:8d} B"
+        f" | Sample Index: {samples.sample_index[0]:8d}"
+        f" | Recent: {recent_rate/1e6:5.2f} MB/s"
+        f" | Avg: {avg_rate/1e6:5.2f} MB/s" + (
+            f" | Timestep: {samples.timestamp[0]/1e6:8.3f} s "
+            if samples.timestamp is not None else ""
+        ),
         end="  \r",
         flush=True,  # Remove this in actual experiments
     )
 
 
-# Use the aligned-buffer context to start/stop the callback queue
-with xdaq.dev.start_receiving_aligned_buffer(
-        xdaq.ep.PipeOutData,
-        frame_size,
-        on_data_received,
-        chunk_size=chunk_size,
-):
+# Start receiving data
+with xdaq.start_receiving_buffer(on_data_received):
     # Kick off acquisition
     xdaq.start(continuous=True)
 
-    # Wait until SIGINT
+    # Wait until interrupted or error occurs
     while is_running:
-        time.sleep(0.1)
+        time.sleep(0.01)
+        if current_error is not None:
+            print(f"\n[Callback Error] {current_error}")
+            # Stop callback from processing more data
+            is_running = False
 
     # Stop acquisition
     xdaq.stop(wait=True)

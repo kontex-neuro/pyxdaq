@@ -9,7 +9,7 @@ requires-python = ">=3.11"
 dependencies = [
     "colorlog",
     "dataclass_wizard",
-    "pylibxdaq==0.3.*",
+    "pylibxdaq==0.4.*",
     "numpy",
     "rich",
     "tqdm",
