@@ -194,6 +194,11 @@ class XDAQ:
         self.ep = RHS if self.dev.rhs else RHD
         self.rhs = self.dev.rhs
         self.ports = XDAQPorts.default(2, 1 if self.dev.rhs else 2, False if self.dev.rhs else True)
+        if 'Device Timestamp' in self.dev.status.get('Capabilities', {}):
+            self.device_timestamp = True
+            self.dev.raw.set_register_sync(0x1530, 1, 1)
+        else:
+            self.device_timestamp = False
 
     def getreg(self, sample_rate: SampleRate) -> Union[RHDDriver, RHSDriver]:
         R = RHSDriver if self.rhs else RHDDriver
@@ -908,7 +913,7 @@ class XDAQ:
     def runAndReadDataBlock(self, samples) -> DataBlock:
         buffer = self.runAndReadBuffer(samples)
         return DataBlock.from_buffer(
-            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream
+            self.rhs, self.getSampleSizeBytes(), buffer, self.numDataStream, self.device_timestamp
         )
 
     def start_receiving_buffer(
@@ -994,7 +999,7 @@ class XDAQ:
         self.dev.SendTrig(self.ep.TrigInConfig, 4, self.ep.WireInMultiUse, 1 if enable else 0)
 
     def getSampleSizeBytes(self):
-        return getBlocksizeInWords(self.rhs, self.numDataStream) * 2
+        return getBlocksizeInWords(self.rhs, self.numDataStream, self.device_timestamp) * 2
 
     def getSampleRate(self) -> int:
         return self.sampleRate.value[2]
@@ -1237,10 +1242,12 @@ class XDAQ:
     def buffer_to_samples(self, buffer: bytes) -> Samples:
         sample_size = self.getSampleSizeBytes()
         n_streams = self.numDataStream
-        block = DataBlock.from_buffer(self.rhs, sample_size, buffer, n_streams)
+        block = DataBlock.from_buffer(
+            self.rhs, sample_size, buffer, n_streams, self.device_timestamp
+        )
         samples = block.to_samples()
         return samples
-    
+
 
 def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_headstage: bool = False):
     devices = Board.list_devices()
@@ -1259,14 +1266,14 @@ def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_heads
     return xdaq
 
 
-def getBlocksizeInWords(rhs, numDataStreams):
+def getBlocksizeInWords(rhs, numDataStreams, device_timestamp):
     if rhs:
         # 4 = magic number; 2 = time stamp; 20 = (16 amp channels + 4 aux commands, each 32 bit results);
         # 4 = stim control params; 8 = DACs; 8 = ADCs; 2 = TTL in/out
         sampleSize = 4 + 2 + numDataStreams * (2 * (16 + 4) + 4) + 8 + 8 + 2 + 2 + 2
-        return sampleSize
+        return sampleSize + device_timestamp * 4
     else:
         # 4 = magic number; 2 = time stamp; 35 = (32 amp channels + 3 aux commands); 0-3 filler words; 8 = ADCs; 4 = TTL in/out
         padding = ((numDataStreams + 2) % 4)
         sampleSize = (4 + 2 + (numDataStreams * (32 + 3)) + padding + 8 + 2 + 2)
-        return sampleSize
+        return sampleSize + device_timestamp * 4

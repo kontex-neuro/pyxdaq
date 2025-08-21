@@ -6,7 +6,6 @@ from pyxdaq.datablock import amplifier2uv
 from pyxdaq.xdaq import get_XDAQ
 from pyxdaq.stim import enable_stim, pulses
 
-
 xdaq = get_XDAQ(rhs=True)
 is_running = True
 
@@ -65,7 +64,7 @@ def on_data_received(data: bytes, error: str):
     if max_amp > uv_threshold:
         # Enable manual trigger
         xdaq.manual_trigger(0, True)
-        print(f"Stim triggered at Timestep:{samples.ts[0]:8d}")
+        print(f"Stim triggered at sample index:{samples.sample_index[0]:8d}")
         # Disable manual trigger
         xdaq.manual_trigger(0, False)
 
@@ -84,9 +83,7 @@ disable_stim = enable_stim(
 
 print("Starting XDAQ acquisition...")
 # Use the aligned-buffer context to start/stop the callback queue
-with xdaq.start_receiving_buffer(
-    on_data_received,
-):
+with xdaq.start_receiving_buffer(on_data_received):
     # Kick off acquisition
     xdaq.start(continuous=True)
 
