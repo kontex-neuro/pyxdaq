@@ -26,7 +26,7 @@ class Sample:
         amp: Headstage amplifier channels
             Type: 16-bit unsigned integer
             Shape: [32, datastreams] for RHD; [16, datastreams, 2] for RHS
-        timestamp: Device timestamp in microseconds since epoch (Gen 2 Only)
+        timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
             Type: 64-bit unsigned integer or None
         adc: Analog input channels
             Type: 16-bit unsigned integer
@@ -145,7 +145,7 @@ class Samples(Sample):
             Type: 16-bit unsigned integer
             Shape: [n_samples, channels, datastreams]           for RHD; 
                    [n_samples, channels, datastreams, [DC, AC]] for RHS
-        timestamp: Device timestamp in microseconds since epoch (Gen 2 Only)
+        timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
             Type: 64-bit unsigned integer or None
             Shape: [n_samples] or None
         adc: Analog input channels
