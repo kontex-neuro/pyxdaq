@@ -37,8 +37,16 @@ class StreamConfig(JSONWizard):
     def __str__(self):
         stat = ('🟢' if self.enabled else '🛑') if self.available else '🚫'
         if not self.available:
-            return f'{stat}Stream[{self.sid:02d}]-NA'
-        return f'{stat}Stream[{self.sid:02d}]-{self.chip.name}:{self.miso.name} ~{self.delay}'
+            return f'{stat} Data stream[{self.sid:02d}] - NA'
+        channel_ranges = {
+            HeadstageChipMISOID.MISO_A: "[ 0,31]",
+            HeadstageChipMISOID.MISO_B: "[32,63]",
+        }
+        channel_range = channel_ranges.get(self.miso, "NA")
+        return (
+            f"{stat} Data stream[{self.sid:02d}] - "
+            f"{self.chip.name}:{channel_range}"
+        )
 
 
 @dataclass
@@ -84,11 +92,9 @@ class HdmiPort(JSONWizard):
         out = ''
         for i, s in enumerate(self.streams):
             if i == 0:
-                out += f' - {s}\n'
+                out += f'{self.portNumber:1d}- {s}\n'
             elif i == len(self.streams) - 1:
-                out += f' - {s}'
-            elif i == len(self.streams) // 2:
-                out += f'{self.portNumber:1d}  {s}\n'
+                out += f'|- {s}'
             else:
                 out += f'|  {s}\n'
         return out

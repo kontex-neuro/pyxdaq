@@ -8,6 +8,7 @@ from pyxdaq.stim import enable_stim, pulses
 
 xdaq = get_XDAQ(rhs=True)
 is_running = True
+print(xdaq.ports)
 
 
 def _handle_sigint(sig, frame):
