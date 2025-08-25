@@ -98,19 +98,23 @@ class Sample:
                 count=4 * datastreams,
             ).reshape(4, datastreams)
             idx += 4 * datastreams * 2
-            idx += 4
-
-            dac = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
-            idx += 16
+            idx += 4  # padding
         else:
             stim = None
-            dac = None
             idx += 2 * ((datastreams + 2) % 4)  # padding
+
         if device_timestamp:
             timestamp = struct.unpack("<Q", buffer[idx:idx + 8])[0]
             idx += 8
         else:
             timestamp = None
+
+        if rhs:
+            dac = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
+            idx += 16
+        else:
+            dac = None
+
         adc = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
         idx += 16
 
