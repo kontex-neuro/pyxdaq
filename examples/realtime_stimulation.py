@@ -40,10 +40,10 @@ def on_data_received(data: bytes, error: str):
         return
 
     buffer = bytearray(data)
-    length = len(buffer)
-    # Error check: if not running, it could be the last data chunk.
+    # Press Ctrl+C will set is_running to False,
+    # Signal notifies this callback here, it could be the last data chunk.
+    # Skip processing of the last data chunk and just return here.
     if not is_running:
-        print(f"[Warning] invalid frame length {length}")
         return
 
     # Parse: convert buffer to samples
