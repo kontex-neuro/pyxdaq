@@ -57,8 +57,11 @@ class Sample:
 
     @classmethod
     def from_buffer(
-        cls, rhs: bool, buffer: Union[bytes, bytearray, memoryview], datastreams: int,
-        device_timestamp: bool
+        cls,
+        rhs: bool,
+        buffer: Union[bytes, bytearray, memoryview],
+        datastreams: int,
+        device_timestamp: bool,
     ) -> "Sample":
         """
         Deserialize a single sample from a buffer, preserving original memory
@@ -147,7 +150,7 @@ class Samples(Sample):
             | datastreams | S     | S     | Number of datastreams: depends on type and numbers of attached headstages |
             | [DC, AC]    | None  | 2     | DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain       |
             Type: 16-bit unsigned integer
-            Shape: [n_samples, channels, datastreams]           for RHD; 
+            Shape: [n_samples, channels, datastreams]           for RHD;
                    [n_samples, channels, datastreams, [DC, AC]] for RHS
         timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
             Type: 64-bit unsigned integer or None
@@ -206,9 +209,22 @@ class Samples(Sample):
             ).transpose(1, 0, 2).reshape((rom.shape[1], -1))
             return aux[:, 0].T, np.zeros_like(aux[:, 0].T)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Samples):
+            return NotImplemented
+
+        return (
+            np.array_equal(self.sample_index, other.sample_index)
+            and np.array_equal(self.aux, other.aux) and np.array_equal(self.amp, other.amp)
+            and np.array_equal(self.timestamp, other.timestamp)
+            and np.array_equal(self.adc, other.adc) and np.array_equal(self.ttlin, other.ttlin)
+            and np.array_equal(self.ttlout, other.ttlout) and np.array_equal(self.dac, other.dac)
+            and np.array_equal(self.stim, other.stim) and self.n == other.n
+        )
+
 
 @dataclass
-class DataBlock:
+class OldDataBlock:
     """
     Raw data block preserving original memory layout.
     """
@@ -217,8 +233,12 @@ class DataBlock:
 
     @classmethod
     def from_buffer(
-        cls, rhs, sample_size, buffer: Union[bytes, bytearray, memoryview], datastreams: int,
-        device_timestamp: bool
+        cls,
+        rhs,
+        sample_size,
+        buffer: Union[bytes, bytearray, memoryview],
+        datastreams: int,
+        device_timestamp: bool,
     ) -> "DataBlock":
         return cls(
             [
@@ -243,6 +263,72 @@ class DataBlock:
             None if self.samples[0].dac is None else np.stack([s.dac for s in self.samples]),
             None if self.samples[0].stim is None else np.stack([s.stim for s in self.samples]),
             len(self.samples),
+        )
+
+
+@dataclass
+class DataBlock:
+    samples: np.ndarray
+
+    @classmethod
+    def from_buffer(
+        cls,
+        rhs: bool,
+        sample_size: int,
+        buffer: Union[bytes, bytearray, memoryview],
+        datastreams: int,
+        device_timestamp: bool,
+    ) -> "DataBlock":
+        magic = struct.unpack("<Q", buffer[:8])[0]
+        if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
+            raise ValueError(f"Invalid magic number: {magic:016X}")
+
+        fields = []
+        fields.append(("magic", "<u8"))
+        fields.append(("sample_index", "<u4"))
+        if rhs:
+            fields.append(("aux", "<u2", (3, datastreams, 2)))
+            fields.append(("amp", "<u2", (16, datastreams, 2)))
+            fields.append(("aux0", "<u2", (1, datastreams, 2)))
+            fields.append(("stim", "<u2", (4, datastreams)))
+            fields.append(("pad", "V4"))
+        else:
+            fields.append(("aux", "<u2", (3, datastreams)))
+            fields.append(("amp", "<u2", (32, datastreams)))
+            fields.append(("pad", f"V{2 * ((datastreams + 2) % 4)}"))
+        if device_timestamp:
+            fields.append(("timestamp", "<u8"))
+        if rhs:
+            fields.append(("dac", "<u2", (8,)))
+        fields.append(("adc", "<u2", (8,)))
+        fields.append(("ttlin", "<u4", (1,)))
+        fields.append(("ttlout", "<u4", (1,)))
+
+        dtype = np.dtype(fields, align=False)
+        if sample_size != dtype.itemsize:
+            raise ValueError(f"Expected sample_size = {sample_size}, got = {dtype.itemsize}")
+
+        n_samples = len(buffer) // sample_size
+        samples = np.frombuffer(buffer, dtype=dtype, count=n_samples)
+
+        return cls(samples=samples)
+
+    def to_samples(self) -> Samples:
+        s = self.samples
+
+        aux = np.concatenate([s["aux0"], s["aux"]], axis=1) if "aux0" in s.dtype.names else s["aux"]
+
+        return Samples(
+            np.ascontiguousarray(s["sample_index"]),
+            np.ascontiguousarray(aux),
+            np.ascontiguousarray(s["amp"]),
+            np.ascontiguousarray(s["timestamp"]) if "timestamp" in s.dtype.names else None,
+            np.ascontiguousarray(s["adc"]),
+            np.ascontiguousarray(s["ttlin"]),
+            np.ascontiguousarray(s["ttlout"]),
+            np.ascontiguousarray(s["dac"]) if "dac" in s.dtype.names else None,
+            np.ascontiguousarray(s["stim"]) if "stim" in s.dtype.names else None,
+            len(s),
         )
 
 
