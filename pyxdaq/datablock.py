@@ -11,53 +11,7 @@ _RHS_HEADER_MAGIC = 0x8D542C8A49712F0B
 
 
 @dataclass
-class Sample:
-    """
-    Represents a single sample at time `sample_index` from the XDAQ data stream.
-    Headstages can vary in data streams and channels.
-
-    Attributes:
-        sample_index: Acquisition sample count / timestep / timestamp
-            Type: 32-bit unsigned integer
-            Shape: scalar
-        aux: Auxiliary data channels from the headstage
-            Type: 16-bit unsigned integer
-            Shape: [3, datastreams] for RHD; [4, datastreams, 2] for RHS
-        amp: Headstage amplifier channels
-            Type: 16-bit unsigned integer
-            Shape: [32, datastreams] for RHD; [16, datastreams, 2] for RHS
-        timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
-            Type: 64-bit unsigned integer or None
-        adc: Analog input channels
-            Type: 16-bit unsigned integer
-            Shape: [8]
-        ttlin: Digital input channels
-            Type: 32-bit unsigned integer
-            Shape: [1]
-        ttlout: Digital output channels readback
-            Type: 32-bit unsigned integer
-            Shape: [1]
-        dac: Analog output channels readback (RHS only)
-            Type: 16-bit unsigned integer
-            Shape: [8] (None for RHD)
-        stim: Stimulation status readback (RHS only)
-            Type: 16-bit unsigned integer
-            Shape: [4, datastreams] (None for RHD)
-    """
-
-    sample_index: Union[int, np.ndarray]
-    aux: np.ndarray
-    amp: np.ndarray
-    timestamp: Union[None, int, np.ndarray]
-    adc: np.ndarray
-    ttlin: np.ndarray
-    ttlout: np.ndarray
-    dac: Union[None, np.ndarray]
-    stim: Union[None, np.ndarray]
-
-
-@dataclass
-class Samples(Sample):
+class Samples:
     """
     Collection of samples; first dimension is sample index.
 
@@ -102,6 +56,15 @@ class Samples(Sample):
             Shape: scalar
     """
 
+    sample_index: Union[int, np.ndarray]
+    aux: np.ndarray
+    amp: np.ndarray
+    timestamp: Union[None, int, np.ndarray]
+    adc: np.ndarray
+    ttlin: np.ndarray
+    ttlout: np.ndarray
+    dac: Union[None, np.ndarray]
+    stim: Union[None, np.ndarray]
     n: int
 
     def device_name(self):
