@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from . import impedance, resources
 from .board import Board
 from .constants import *
-from .datablock import DataBlock, Samples
+from .datablock import DataBlock, Samples, get_sample_size
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
 
@@ -1005,7 +1005,7 @@ class XDAQ:
         self.dev.SendTrig(self.ep.TrigInConfig, 4, self.ep.WireInMultiUse, 1 if enable else 0)
 
     def getSampleSizeBytes(self):
-        return getBlocksizeInWords(self.rhs, self.numDataStream, self.device_timestamp) * 2
+        return get_sample_size(self.rhs, self.numDataStream, self.device_timestamp)
 
     def getSampleRate(self) -> int:
         return self.sampleRate.value[2]
@@ -1270,16 +1270,3 @@ def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_heads
     xdaq.find_connected_headstages()
     xdaq.calibrateADC(fastSettle)
     return xdaq
-
-
-def getBlocksizeInWords(rhs, numDataStreams, device_timestamp):
-    if rhs:
-        # 4 = magic number; 2 = time stamp; 20 = (16 amp channels + 4 aux commands, each 32 bit results);
-        # 4 = stim control params; 8 = DACs; 8 = ADCs; 2 = TTL in/out
-        sampleSize = 4 + 2 + numDataStreams * (2 * (16 + 4) + 4) + 8 + 8 + 2 + 2 + 2
-        return sampleSize + device_timestamp * 4
-    else:
-        # 4 = magic number; 2 = time stamp; 35 = (32 amp channels + 3 aux commands); 0-3 filler words; 8 = ADCs; 4 = TTL in/out
-        padding = ((numDataStreams + 2) % 4)
-        sampleSize = (4 + 2 + (numDataStreams * (32 + 3)) + padding + 8 + 2 + 2)
-        return sampleSize + device_timestamp * 4
