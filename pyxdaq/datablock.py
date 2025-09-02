@@ -344,3 +344,31 @@ def adc2v(adc: np.ndarray) -> np.ndarray:
     Convert ADC data to volts.
     """
     return (adc.astype(np.float32) - 32768) * 0.0003125
+
+
+def get_sample_size(rhs: bool, datastreams: int, device_timestamp: bool) -> int:
+    if rhs:
+        return (
+            12  # header (8 bytes magic + 4 bytes sample_index)
+            + 3 * datastreams * 2 * 2  # aux (3 channels * datastreams * 2 bytes * 2 DC/AC)
+            + 1 * datastreams * 2 * 2  # aux0 (1 channel * datastreams * 2 bytes * 2 DC/AC)
+            + 16 * datastreams * 2 * 2  # amp (16 channels * datastreams * 2 bytes * 2 DC/AC)
+            + 4 * datastreams * 2  # stim (4 channels * datastreams * 2 bytes)
+            + 4  # padding
+            + 8 * (1 if device_timestamp else 0)  # timestamp
+            + 16  # dac
+            + 16  # adc
+            + 4  # ttlin
+            + 4  # ttlout
+        )
+    else:
+        return (
+            12  # header (8 bytes magic + 4 bytes sample_index)
+            + 3 * datastreams * 2  # aux (3 channels * datastreams * 2 bytes)
+            + 32 * datastreams * 2  # amp (32 channels * datastreams * 2 bytes)
+            + 2 * ((datastreams + 2) % 4)  # padding
+            + 8 * (1 if device_timestamp else 0)  # timestamp
+            + 16  # adc
+            + 4  # ttlin
+            + 4  # ttlout
+        )
