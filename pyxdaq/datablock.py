@@ -1,6 +1,6 @@
 import struct
 from dataclasses import dataclass
-from typing import List, Union
+from typing import Union
 
 import numpy as np
 
@@ -54,79 +54,6 @@ class Sample:
     ttlout: np.ndarray
     dac: Union[None, np.ndarray]
     stim: Union[None, np.ndarray]
-
-    @classmethod
-    def from_buffer(
-        cls,
-        rhs: bool,
-        buffer: Union[bytes, bytearray, memoryview],
-        datastreams: int,
-        device_timestamp: bool,
-    ) -> "Sample":
-        """
-        Deserialize a single sample from a buffer, preserving original memory
-        layout for optimization. Assumes buffer is exactly one sample; no
-        partial-buffer handling.
-        """
-        idx = 0
-        magic, sample_index = struct.unpack("<QI", buffer[idx:12])
-        if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
-            raise ValueError(f"Invalid magic number: {magic:016X}")
-        idx += 12
-
-        aux = np.frombuffer(
-            buffer[idx:], dtype=_uint16le, count=3 * datastreams * (2 if rhs else 1)
-        ).reshape([3, datastreams] + ([2] if rhs else []))
-        idx += 3 * datastreams * 2 * (2 if rhs else 1)
-
-        amp = np.frombuffer(
-            buffer[idx:],
-            dtype=_uint16le,
-            count=(16 if rhs else 32) * datastreams * (2 if rhs else 1)
-        ).reshape([16 if rhs else 32, datastreams] + ([2] if rhs else []))
-        idx += (16 if rhs else 32) * datastreams * 2 * (2 if rhs else 1)
-
-        if rhs:
-            aux0 = np.frombuffer(
-                buffer[idx:],
-                dtype=_uint16le,
-                count=1 * datastreams * 2,
-            ).reshape((1, datastreams, 2))
-            aux = np.concatenate((aux0, aux), axis=0)
-            idx += 1 * datastreams * 2 * 2
-
-            stim = np.frombuffer(
-                buffer[idx:],
-                dtype=_uint16le,
-                count=4 * datastreams,
-            ).reshape(4, datastreams)
-            idx += 4 * datastreams * 2
-            idx += 4  # padding
-        else:
-            stim = None
-            idx += 2 * ((datastreams + 2) % 4)  # padding
-
-        if device_timestamp:
-            timestamp = struct.unpack("<Q", buffer[idx:idx + 8])[0]
-            idx += 8
-        else:
-            timestamp = None
-
-        if rhs:
-            dac = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
-            idx += 16
-        else:
-            dac = None
-
-        adc = np.frombuffer(buffer[idx:], dtype=_uint16le, count=8)
-        idx += 16
-
-        ttlin = np.frombuffer(buffer[idx:], dtype=_uint32le, count=1)
-        idx += 4
-
-        ttlout = np.frombuffer(buffer[idx:], dtype=_uint32le, count=1)
-        idx += 4
-        return cls(sample_index, aux, amp, timestamp, adc, ttlin, ttlout, dac, stim)
 
 
 @dataclass
@@ -208,62 +135,6 @@ class Samples(Sample):
                 (rom.shape[0], rom.shape[1], 2)
             ).transpose(1, 0, 2).reshape((rom.shape[1], -1))
             return aux[:, 0].T, np.zeros_like(aux[:, 0].T)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Samples):
-            return NotImplemented
-
-        return (
-            np.array_equal(self.sample_index, other.sample_index)
-            and np.array_equal(self.aux, other.aux) and np.array_equal(self.amp, other.amp)
-            and np.array_equal(self.timestamp, other.timestamp)
-            and np.array_equal(self.adc, other.adc) and np.array_equal(self.ttlin, other.ttlin)
-            and np.array_equal(self.ttlout, other.ttlout) and np.array_equal(self.dac, other.dac)
-            and np.array_equal(self.stim, other.stim) and self.n == other.n
-        )
-
-
-@dataclass
-class OldDataBlock:
-    """
-    Raw data block preserving original memory layout.
-    """
-
-    samples: List[Sample]
-
-    @classmethod
-    def from_buffer(
-        cls,
-        rhs,
-        sample_size,
-        buffer: Union[bytes, bytearray, memoryview],
-        datastreams: int,
-        device_timestamp: bool,
-    ) -> "DataBlock":
-        return cls(
-            [
-                Sample.from_buffer(rhs, buffer[i:i + sample_size], datastreams, device_timestamp)
-                for i in range(0, len(buffer), sample_size)
-            ]
-        )
-
-    def to_samples(self) -> Samples:
-        """
-        Concatenate samples into a Samples object, discarding original memory layout.
-        """
-        return Samples(
-            np.array([s.sample_index for s in self.samples]),
-            np.stack([s.aux for s in self.samples]),
-            np.stack([s.amp for s in self.samples]),
-            None
-            if self.samples[0].timestamp is None else np.stack([s.timestamp for s in self.samples]),
-            np.stack([s.adc for s in self.samples]),
-            np.stack([s.ttlin for s in self.samples]),
-            np.stack([s.ttlout for s in self.samples]),
-            None if self.samples[0].dac is None else np.stack([s.dac for s in self.samples]),
-            None if self.samples[0].stim is None else np.stack([s.stim for s in self.samples]),
-            len(self.samples),
-        )
 
 
 @dataclass
