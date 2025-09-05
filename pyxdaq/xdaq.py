@@ -1,4 +1,5 @@
 import math
+import inspect
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -43,10 +44,8 @@ class StreamConfig(JSONWizard):
             HeadstageChipMISOID.MISO_B: "[32,63]",
         }
         channel_range = channel_ranges.get(self.miso, "NA")
-        return (
-            f"{stat} Data stream[{self.sid:02d}] - "
-            f"{self.chip.name}:{channel_range}"
-        )
+        return (f"{stat} Data stream[{self.sid:02d}] - "
+                f"{self.chip.name}:{channel_range}")
 
 
 @dataclass
@@ -935,6 +934,73 @@ class XDAQ:
         return self.dev.start_receiving_aligned_buffer(
             self.ep.PipeOutData, sample_size, callback, chunk_size=chunk_size
         )
+
+    def start_receiving_samples(
+        self,
+        callbacks: List[Union[
+            Callable[[Samples], None],
+            Callable[[Samples | None, str | None], None],
+        ]],
+        on_error: Optional[Callable[[str], None]] = None,
+    ):
+        callback_info = []
+        for cb in callbacks:
+            try:
+                sig = inspect.signature(cb)
+                arity = len(sig.parameters)
+                callback_info.append({'cb': cb, 'arity': arity})
+            except (ValueError, TypeError):
+                if on_error:
+                    on_error(
+                        f"Could not determine signature for callback {cb}. It will be ignored."
+                    )
+
+        def _internal_callback(data: pyxdaq_device.DataView | None, error: str | None):
+            if error is not None:
+                if on_error:
+                    on_error(error)
+                for info in callback_info:
+                    if info['arity'] == 2:
+                        try:
+                            info['cb'](None, error)
+                        except Exception as e:
+                            if on_error:
+                                on_error(
+                                    f"Callback {info['cb'].__name__} failed while handling error: {e}"
+                                )
+                return
+
+            if data is not None:
+                try:
+                    samples = self.buffer_to_samples(bytes(data))
+                except Exception as e:
+                    if on_error:
+                        on_error(f"Failed to parse data block: {e}")
+                    for info in callback_info:
+                        if info['arity'] == 2:
+                            try:
+                                info['cb'](None, f"Failed to parse data block: {e}")
+                            except Exception as e_inner:
+                                if on_error:
+                                    on_error(
+                                        f"Callback {info['cb'].__name__} failed "
+                                        f"while handling parsing error: {e_inner}"
+                                    )
+                    return
+
+                for info in callback_info:
+                    try:
+                        if info['arity'] == 1:
+                            info['cb'](samples)
+                        elif info['arity'] == 2:
+                            info['cb'](samples, None)
+                    except Exception as e:
+                        if on_error:
+                            on_error(
+                                f"Callback {info['cb'].__name__} failed during data processing: {e}"
+                            )
+
+        return self.start_receiving_buffer(_internal_callback)
 
     def testCableDelay(self, output: str = ''):
         headstagename = np.array([ord(i) for i in ('INTAN' if self.rhs else 'INTANRHD')])
