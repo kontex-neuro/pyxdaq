@@ -1,7 +1,9 @@
 import signal
 import time
 
+from pyxdaq.datablock import Samples
 from pyxdaq.xdaq import get_XDAQ
+from pyxdaq.writer import OpenEphysWriter
 
 is_running = True
 
@@ -36,10 +38,15 @@ recent_events = []
 num_streams = xdaq.numDataStream
 start_time = time.time()
 
-current_error = None
+
+def on_error(error: str):
+    """Prints errors from the data stream and stops the application."""
+    global is_running
+    print(f"\n[Callback Error] {error}")
+    is_running = False
 
 
-def on_data_received(data: bytes, error: str):
+def on_samples_received(samples: Samples):
     """
     Called in a dedicated thread whenever a data frame arrives.
 
@@ -50,31 +57,11 @@ def on_data_received(data: bytes, error: str):
     CALLBACK LIFETIME: even after xdaq.stop(), this callback may still be
     invoked until exit the start_receiving_buffer context.
     """
-    global total_bytes_received, recent_events, current_error
+    global total_bytes_received, recent_events
 
-    if error:
-        current_error = error
-        return
-
-    if not data:
-        return
-
-    buffer = bytearray(data)
-    length = len(buffer)
-    if length % frame_size != 0:
-        if is_running:
-            print(f"[Warning] invalid frame length {length}")
-        else:
-            # invalid frame length, could be the last data chunk.
-            pass
-        return
-
-    # Parse: convert bytes → samples
-    try:
-        samples = xdaq.buffer_to_samples(buffer)
-    except ValueError as e:
-        current_error = str(e)
-        return
+    # The new API provides Samples objects directly.
+    # We can calculate the byte length from the number of samples.
+    length = samples.n * frame_size
 
     # Update throughput stats
     total_bytes_received += length
@@ -101,21 +88,21 @@ def on_data_received(data: bytes, error: str):
     )
 
 
-# Start receiving data
-with xdaq.start_receiving_buffer(on_data_received):
-    # Kick off acquisition
-    xdaq.start(continuous=True)
+# Start receiving data using the new samples-based API
+# The OpenEphysWriter is used as a context manager to handle file operations.
+with OpenEphysWriter(xdaq, root_path=".") as writer:
+    # We can pass multiple callbacks; one for printing stats and one for writing data.
+    with xdaq.start_receiving_samples(callbacks=[on_samples_received, writer.write_data],
+                                      on_error=on_error):
+        # Kick off acquisition
+        xdaq.start(continuous=True)
 
-    # Wait until interrupted or error occurs
-    while is_running:
-        time.sleep(0.01)
-        if current_error is not None:
-            print(f"\n[Callback Error] {current_error}")
-            # Stop callback from processing more data
-            is_running = False
+        # Wait until interrupted or error occurs
+        while is_running:
+            time.sleep(0.01)
 
-    # Stop acquisition
-    xdaq.stop(wait=True)
-    # Callback may still run until we exit this block
+        # Stop acquisition
+        xdaq.stop(wait=True)
+        # Callback may still run until we exit this block
 
 print("\nExiting...")
