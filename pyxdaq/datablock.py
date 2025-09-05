@@ -102,7 +102,8 @@ class Samples:
 
 @dataclass
 class DataBlock:
-    samples: np.ndarray
+    _samples: np.ndarray
+    amp: np.ndarray
 
     @classmethod
     def from_buffer(
@@ -145,17 +146,29 @@ class DataBlock:
         n_samples = len(buffer) // sample_size
         samples = np.frombuffer(buffer, dtype=dtype, count=n_samples)
 
-        return cls(samples=samples)
+        # Create a zero-copy transposed view of the amplifier data
+        amp_data = samples["amp"]
+        if amp_data.ndim == 4:  # RHS
+            amp_view = amp_data.transpose(0, 2, 3, 1)
+        elif amp_data.ndim == 3:  # RHD
+            amp_view = amp_data.transpose(0, 2, 1)
+        else:
+            amp_view = amp_data
+
+        return cls(_samples=samples, amp=amp_view)
 
     def to_samples(self) -> Samples:
-        s = self.samples
+        s = self._samples
 
         aux = np.concatenate([s["aux0"], s["aux"]], axis=1) if "aux0" in s.dtype.names else s["aux"]
 
         return Samples(
             np.ascontiguousarray(s["sample_index"]),
             np.ascontiguousarray(aux),
-            np.ascontiguousarray(s["amp"]),
+            np.ascontiguousarray(
+                s["amp"].transpose(0, 2, 1, 3) if s["amp"].ndim ==
+                4 else s["amp"].transpose(0, 2, 1)
+            ),
             np.ascontiguousarray(s["timestamp"]) if "timestamp" in s.dtype.names else None,
             np.ascontiguousarray(s["adc"]),
             np.ascontiguousarray(s["ttlin"]),
