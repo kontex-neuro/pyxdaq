@@ -35,7 +35,7 @@ def plot_stim(sps: Samples, target_channel: int, target_stream: int):
 
     fig, ax = plt.subplots(figsize=(10, 6))
     x = np.arange(sps.amp.shape[0]) / xdaq.sampleRate.rate
-    ax.plot(x, adc2v(sps.amp[:, target_channel, target_stream, 1]), c='b', alpha=0.4, label='amp')
+    ax.plot(x, adc2v(sps.amp[:, target_stream, target_channel, 1]), c='b', alpha=0.4, label='amp')
     ax = ax.twinx()
     stim_on = (sps.stim[:, 0, target_stream] >> target_channel) & 1
     ax.plot(x, stim_on, c='r', label='stim', lw=4, alpha=0.5)
