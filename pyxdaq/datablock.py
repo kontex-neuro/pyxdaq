@@ -27,12 +27,12 @@ class Samples:
             | Headstage   |  RHD  |  RHS  |                                                                           |
             |-------------|-------|-------|---------------------------------------------------------------------------|
             | n_samples   | N     | N     | Number of samples                                                         |
-            | channels    | 32    | 16    | Number of channels per datastream                                         |
             | datastreams | S     | S     | Number of datastreams: depends on type and numbers of attached headstages |
+            | channels    | 32    | 16    | Number of channels per datastream                                         |
             | [DC, AC]    | None  | 2     | DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain       |
             Type: 16-bit unsigned integer
-            Shape: [n_samples, channels, datastreams]           for RHD;
-                   [n_samples, channels, datastreams, [DC, AC]] for RHS
+            Shape: [n_samples, datastreams, channels]           for RHD;
+                   [n_samples, datastreams, channels, [DC, AC]] for RHS
         timestamp: XDAQ device timestamp in microseconds (Gen 2 Only)
             Type: 64-bit unsigned integer or None
             Shape: [n_samples] or None

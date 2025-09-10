@@ -49,7 +49,7 @@ def on_data_received(data: bytes, error: str):
     # Parse: convert buffer to samples
     samples = xdaq.buffer_to_samples(buffer)
 
-    amp_uv = amplifier2uv(samples.amp[:, 1, target_stream, 1])
+    amp_uv = amplifier2uv(samples.amp[:, target_stream, 1, 1])
     # Shape: [n_samples, channels, datastreams]           for RHD;
     #        [n_samples, channels, datastreams, [DC, AC]] for RHS
     #   n_samples: number of samples
