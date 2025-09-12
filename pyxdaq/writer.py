@@ -189,38 +189,39 @@ class OpenEphysWriter:
             return
 
         for key, stream_path in self.stream_paths.items():
-            try:
-                self._file_handles[key].close()
-                for mmap_key in self._memmaps[key]:
+            self._file_handles[key].close()
+
+            # Flush, then delete the memmap objects. This should release file locks.
+            for mmap_key in self._memmaps[key]:
+                if self._memmaps[key][mmap_key] is not None:
                     self._memmaps[key][mmap_key].flush()
+            del self._memmaps[key]
 
-                final_sample_count = self._sample_counts[key]
+            # Close the file handles.
+            for fp_key in self._memmap_file_handles[key]:
+                self._memmap_file_handles[key][fp_key].close()
 
+            final_sample_count = self._sample_counts[key]
+
+            sn_mmap_path = self._memmap_paths[key]['sample_numbers']
+            if os.path.exists(sn_mmap_path) and final_sample_count > 0:
                 sn_mmap = np.memmap(
-                    self._memmap_paths[key]['sample_numbers'],
-                    dtype=np.int64,
-                    mode='r',
-                    shape=(final_sample_count,)
+                    sn_mmap_path, dtype=np.int64, mode='r', shape=(final_sample_count,)
                 )
                 np.save(os.path.join(stream_path, "sample_numbers.npy"), sn_mmap)
                 del sn_mmap
-                os.remove(self._memmap_paths[key]['sample_numbers'])
+                os.remove(sn_mmap_path)
 
+            ts_mmap_path = self._memmap_paths[key]['timestamps']
+            if os.path.exists(ts_mmap_path) and final_sample_count > 0:
                 ts_mmap = np.memmap(
-                    self._memmap_paths[key]['timestamps'],
-                    dtype=np.float64,
-                    mode='r',
-                    shape=(final_sample_count,)
+                    ts_mmap_path, dtype=np.float64, mode='r', shape=(final_sample_count,)
                 )
                 np.save(os.path.join(stream_path, "timestamps.npy"), ts_mmap)
                 del ts_mmap
-                os.remove(self._memmap_paths[key]['timestamps'])
+                os.remove(ts_mmap_path)
 
-                print(f"Stopped recording. Data saved in: {stream_path}")
-
-            finally:
-                for fp_key in self._memmap_file_handles[key]:
-                    self._memmap_file_handles[key][fp_key].close()
+            print(f"Stopped recording. Data saved in: {stream_path}")
 
         self._is_recording = False
 
