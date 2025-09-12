@@ -3,6 +3,7 @@ import time
 
 from pyxdaq.datablock import Samples
 from pyxdaq.xdaq import get_XDAQ
+from pyxdaq.writer import OpenEphysWriter
 
 is_running = True
 
@@ -87,17 +88,22 @@ def on_samples_received(samples: Samples):
     )
 
 
-# Start receiving data in a background thread
-with xdaq.start_receiving_samples(callbacks=[on_samples_received], on_error=on_error):
-    # Kick off acquisition
-    xdaq.start(continuous=True)
+# The OpenEphysWriter is used as a context manager to handle file operations.
+with OpenEphysWriter(xdaq, root_path=".") as writer:
+    # Start taking samples, invoke the callback when data arrives
+    # `on_samples_received` callback prints stats
+    # `writer.write_data` callback writes data to disk in Open Ephys format
+    with xdaq.start_receiving_samples(callbacks=[on_samples_received, writer.write_data],
+                                      on_error=on_error):
+        # Kick off acquisition
+        xdaq.start(continuous=True)
 
-    # Wait until interrupted or error occurs
-    while is_running:
-        time.sleep(0.01)
+        # Wait until interrupted or error occurs
+        while is_running:
+            time.sleep(0.01)
 
-    # Stop acquisition
-    xdaq.stop(wait=True)
-    # Callback may still be invoked until we exit the context manager
+        # Stop acquisition
+        xdaq.stop(wait=True)
+        # Callback may still be invoked until we exit the context manager
 
 print("\nExiting...")
