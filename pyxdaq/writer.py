@@ -1,21 +1,204 @@
-import os
+import gc
 import json
+import pathlib
+from dataclasses import dataclass, field
 from datetime import datetime
-from .xdaq import XDAQ
-from .datablock import Samples
+from typing import BinaryIO, Dict, List, Optional
 
 import numpy as np
 
-BIT_VOLTS_AC = 0.195  # uV per bit for AC channels
-BIT_VOLTS_DC = -19.23  # uV per bit for DC channels (-19.23 mV)
+from .datablock import Samples
+from .xdaq import XDAQ
 
-OFFSET_AC = 32768
-OFFSET_DC = 512
+
+@dataclass
+class OpenEphysMetadata:
+    gui_version: str
+    source_processor_name: str = "XDAQ"
+    source_processor_id: int = 100
+    experiment_index: int = 0
+    recording_index: int = 0
+
+    def get_stream_info(
+        self, stream_name: str, sample_rate: float, num_channels: int, bit_volts: float
+    ) -> dict:
+        folder_name = f"{self.source_processor_name}-{self.source_processor_id}.{stream_name}"
+        return {
+            "stream_name":
+                stream_name,
+            "folder_name":
+                folder_name,
+            "sample_rate":
+                float(sample_rate),
+            "num_channels":
+                num_channels,
+            "source_processor_id":
+                self.source_processor_id,
+            "source_processor_name":
+                self.source_processor_name,
+            "channels":
+                [
+                    {
+                        "channel_name": f"CH{i + 1}",
+                        "bit_volts": bit_volts
+                    } for i in range(num_channels)
+                ],
+        }
+
+    def write_structure_oebin(self, recording_path: pathlib.Path, streams: List[dict]) -> None:
+        structure = {
+            "GUI version": self.gui_version,
+            "continuous": streams,
+            "events": [],
+            "spikes": [],
+        }
+        oebin_path = recording_path / "structure.oebin"
+        with open(oebin_path, 'w') as f:
+            json.dump(structure, f, indent=4)
+
+
+@dataclass
+class StreamConfig:
+    name: str  # 'AC', 'DC', or 'continuous'
+    stream_name: str
+    bit_volts: float
+    offset: int
+
+    BIT_VOLTS_AC: float = 0.195
+    BIT_VOLTS_DC: float = -19.23
+    OFFSET_AC: int = 32768
+    OFFSET_DC: int = 512
+
+    @classmethod
+    def create_stream_configs(cls, is_rhs: bool) -> Dict[str, 'StreamConfig']:
+        if is_rhs:
+            return {
+                'AC': cls('AC', 'AC', cls.BIT_VOLTS_AC, cls.OFFSET_AC),
+                'DC': cls('DC', 'DC', cls.BIT_VOLTS_DC, cls.OFFSET_DC)
+            }
+        else:
+            return {'continuous': cls('continuous', 'Rhythm_Data', cls.BIT_VOLTS_AC, cls.OFFSET_AC)}
+
+
+@dataclass
+class StreamWriter:
+    stream_config: StreamConfig
+    recording_path: pathlib.Path
+    source_processor_name: str
+    source_processor_id: int
+    memmap_chunk_size: int
+
+    stream_path: pathlib.Path = field(init=False)
+    data_file: Optional[BinaryIO] = None
+    sample_count: int = 0
+    memmap_capacity: int = 0
+
+    _memmap_paths: Dict[str, pathlib.Path] = field(default_factory=dict)
+    _memmap_file_handles: Dict[str, BinaryIO] = field(default_factory=dict)
+    _memmaps: Dict[str, np.memmap] = field(default_factory=dict)
+
+    DTYPE_SAMPLE_NUMBERS: np.dtype = np.dtype(np.int64)
+    DTYPE_TIMESTAMPS: np.dtype = np.dtype(np.float64)
+
+    def __post_init__(self):
+        folder_name = f"{self.source_processor_name}-{self.source_processor_id}.{self.stream_config.stream_name}"
+        self.stream_path = self.recording_path / "continuous" / folder_name
+        self.stream_path.mkdir(parents=True, exist_ok=True)
+        self.memmap_capacity = self.memmap_chunk_size
+
+        self._memmap_paths = {
+            'sample_numbers': self.stream_path / "sample_numbers.mmap",
+            'timestamps': self.stream_path / "timestamps.mmap",
+        }
+
+    def open(self):
+        self.data_file = open(self.stream_path / "continuous.dat", 'ab')
+        self._create_memmap('sample_numbers', self.DTYPE_SAMPLE_NUMBERS)
+        self._create_memmap('timestamps', self.DTYPE_TIMESTAMPS)
+        return self.stream_path
+
+    def _create_memmap(self, name: str, dtype: np.dtype):
+        fp = open(self._memmap_paths[name], 'w+b')
+        fp.truncate(self.memmap_capacity * dtype.itemsize)
+        self._memmap_file_handles[name] = fp
+        self._memmaps[name] = np.memmap(
+            fp, dtype=dtype, mode='r+', shape=(self.memmap_capacity,)
+        )
+
+    def _resize_memmaps(self, required_capacity: int):
+        new_capacity = self.memmap_capacity
+        while new_capacity < required_capacity:
+            new_capacity += self.memmap_chunk_size
+
+        for memmap in self._memmaps.values():
+            memmap.flush()
+        self._memmaps.clear()
+
+        for name, dtype in [('sample_numbers', self.DTYPE_SAMPLE_NUMBERS),
+                            ('timestamps', self.DTYPE_TIMESTAMPS)]:
+            fp = self._memmap_file_handles[name]
+            fp.truncate(new_capacity * dtype.itemsize)
+            self._memmaps[name] = np.memmap(
+                fp, dtype=dtype, mode='r+', shape=(new_capacity,)
+            )
+
+        self.memmap_capacity = new_capacity
+
+    def write_sample_data(self, samples: "Samples", n_samples: int):
+        required_capacity = self.sample_count + n_samples
+        if required_capacity > self.memmap_capacity:
+            self._resize_memmaps(required_capacity)
+
+        offset = self.sample_count
+        self._memmaps['sample_numbers'][offset:offset + n_samples] = samples.sample_index
+        self._memmaps['timestamps'][offset:offset + n_samples] = samples.timestamp.astype(
+            np.float64
+        ) / 1_000_000.0
+        self.sample_count += n_samples
+
+    def write_amp_data(self, amp_data: np.ndarray, n_samples: int):
+        if self.stream_config.name == 'DC':
+            reshaped = amp_data.reshape(n_samples, -1)
+            dc_10bit = reshaped & 0x3FE
+            data_int16 = (dc_10bit.astype(np.int32) - self.stream_config.offset).astype(np.int16)
+        else:  # AC or continuous
+            reshaped = amp_data.reshape(n_samples, -1)
+            data_int16 = (reshaped.astype(np.int32) - self.stream_config.offset).astype(np.int16)
+        self.data_file.write(data_int16.tobytes())
+
+    def close(self):
+        if self.data_file:
+            self.data_file.close()
+
+        for memmap in self._memmaps.values():
+            memmap.flush()
+        gc.collect()
+        self._memmaps.clear()
+
+        if self.sample_count > 0:
+            self._save_memmap_to_npy('sample_numbers', self.DTYPE_SAMPLE_NUMBERS)
+            self._save_memmap_to_npy('timestamps', self.DTYPE_TIMESTAMPS)
+
+        for handle in self._memmap_file_handles.values():
+            handle.close()
+
+        # Don't attempt to delete .mmap files, just note that they are temporary.
+        for path in self._memmap_paths.values():
+            if path.exists():
+                print(f"Note: Temporary file {path} can be safely deleted manually.")
+
+    def _save_memmap_to_npy(self, name: str, dtype: np.dtype):
+        path = self._memmap_paths[name]
+        if path.exists():
+            try:
+                with open(path, 'rb') as f:
+                    data = np.fromfile(f, dtype=dtype, count=self.sample_count)
+                np.save(self.stream_path / f"{name}.npy", data)
+            except Exception as e:
+                print(f"Warning: Error saving {name}.npy: {e}")
 
 
 class OpenEphysWriter:
-    SOURCE_PROCESSOR_NAME = "Acquisition Board"
-    SOURCE_PROCESSOR_ID = 100
 
     def __init__(
         self,
@@ -24,33 +207,20 @@ class OpenEphysWriter:
         record_node: str = "Record Node 101",
         gui_version: str = "0.6.4"
     ):
-        # 1. Create the top-level session directory
         self.xdaq = xdaq
-        self.gui_version = gui_version
+        self.root_path = pathlib.Path(root_path)
         session_ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        self.session_path = os.path.join(root_path, session_ts)
+        self.session_path = self.root_path / session_ts
+        self.record_node_path = self.session_path / record_node
+        self.record_node_path.mkdir(parents=True, exist_ok=True)
 
-        # The analysis library expects a "Record Node" subdirectory.
-        self.record_node_path = os.path.join(self.session_path, record_node)
-        os.makedirs(self.record_node_path, exist_ok=True)
+        self.metadata = OpenEphysMetadata(gui_version=gui_version)
+        self.experiment_path: Optional[pathlib.Path] = None
+        self.recording_path: Optional[pathlib.Path] = None
 
-        self.experiment_index = 0
-        self.recording_index = 0
         self._is_recording = False
-
-        # File handling attributes
-        self._file_handles = {}
-        self._memmaps = {}
-        self._memmap_file_handles = {}
-        self._memmap_paths = {}
-        self._sample_counts = {}
-        self._memmap_capacities = {}
-        self.memmap_chunk_size_samples = 0
+        self.stream_writers: Dict[str, StreamWriter] = {}
         self.sample_rate = 0
-        self.experiment_path = None
-        self.recording_path = None
-        self.stream_paths = {}
-        self.stream_names = {}
 
     def __enter__(self):
         self.start_recording()
@@ -59,170 +229,59 @@ class OpenEphysWriter:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop_recording()
 
-    def _write_structure_oebin(self):
-        """Creates the structure.oebin JSON file for all streams in the recording."""
-        continuous_streams = []
-
-        for key, stream_display_name in self.stream_names.items():
-            num_channels = self.xdaq.numDataStream * (16 if self.xdaq.rhs else 32)
-            bit_volts = BIT_VOLTS_AC if key == 'AC' or not self.xdaq.rhs else BIT_VOLTS_DC
-            folder_name = f"{self.SOURCE_PROCESSOR_NAME}-{self.SOURCE_PROCESSOR_ID}.{stream_display_name}"
-
-            stream_info = {
-                "stream_name":
-                    stream_display_name,
-                "folder_name":
-                    folder_name,
-                "sample_rate":
-                    float(self.xdaq.sampleRate.rate),
-                "num_channels":
-                    num_channels,
-                "source_processor_id":
-                    self.SOURCE_PROCESSOR_ID,
-                "source_processor_name":
-                    self.SOURCE_PROCESSOR_NAME,
-                "channels":
-                    [
-                        {
-                            "channel_name": f"CH{i+1}",
-                            "bit_volts": bit_volts
-                        } for i in range(num_channels)
-                    ]
-            }
-            continuous_streams.append(stream_info)
-
-        structure = {
-            "GUI version": self.gui_version,
-            "continuous": continuous_streams,
-            "events": [],
-            "spikes": []
-        }
-        oebin_path = os.path.join(self.recording_path, "structure.oebin")
-        with open(oebin_path, 'w') as f:
-            json.dump(structure, f, indent=4)
-
     def start_new_experiment(self):
-        self.experiment_index += 1
-        self.recording_index = 0
-        self.experiment_path = os.path.join(
-            self.record_node_path, f"experiment{self.experiment_index}"
-        )
-        os.makedirs(self.experiment_path, exist_ok=True)
+        self.metadata.experiment_index += 1
+        self.metadata.recording_index = 0
+        self.experiment_path = self.record_node_path / f"experiment{self.metadata.experiment_index}"
+        self.experiment_path.mkdir(exist_ok=True)
 
     def start_recording(self):
         if not self.experiment_path:
             self.start_new_experiment()
 
-        self.recording_index += 1
-        self.recording_path = os.path.join(self.experiment_path, f"recording{self.recording_index}")
-        os.makedirs(self.recording_path, exist_ok=True)
-
-        stream_keys = ['AC', 'DC'] if self.xdaq.rhs else ['continuous']
-        self.stream_names = {'AC': 'AC', 'DC': 'DC', 'continuous': 'Rhythm_Data'}
-        self.stream_names = {key: self.stream_names[key] for key in stream_keys}
+        self.metadata.recording_index += 1
+        self.recording_path = self.experiment_path / f"recording{self.metadata.recording_index}"
+        self.recording_path.mkdir(exist_ok=True)
 
         self.sample_rate = self.xdaq.sampleRate.rate
-        self.memmap_chunk_size_samples = self.sample_rate * 60
+        memmap_chunk_size = self.sample_rate * 60
 
-        for key in stream_keys:
-            stream_display_name = self.stream_names[key]
-            folder_name = f"{self.SOURCE_PROCESSOR_NAME}-{self.SOURCE_PROCESSOR_ID}.{stream_display_name}"
-            stream_path = os.path.join(self.recording_path, "continuous", folder_name)
-            self.stream_paths[key] = stream_path
-            os.makedirs(stream_path, exist_ok=True)
+        stream_configs = StreamConfig.create_stream_configs(self.xdaq.rhs)
+        stream_infos = []
 
-            self._file_handles[key] = open(os.path.join(stream_path, "continuous.dat"), 'ab')
-            self._memmap_capacities[key] = self.memmap_chunk_size_samples
-            self._sample_counts[key] = 0
-
-            self._memmap_paths[key] = {
-                'sample_numbers': os.path.join(stream_path, "sample_numbers.mmap"),
-                'timestamps': os.path.join(stream_path, "timestamps.mmap"),
-            }
-            self._memmap_file_handles[key] = {}
-            self._memmaps[key] = {}
-
-            sn_fp = open(self._memmap_paths[key]['sample_numbers'], 'w+b')
-            sn_fp.truncate(self._memmap_capacities[key] * np.dtype(np.int64).itemsize)
-            self._memmap_file_handles[key]['sample_numbers'] = sn_fp
-            self._memmaps[key]['sample_numbers'] = np.memmap(
-                sn_fp, dtype=np.int64, mode='r+', shape=(self._memmap_capacities[key],)
+        for key, config in stream_configs.items():
+            writer = StreamWriter(
+                stream_config=config,
+                recording_path=self.recording_path,
+                source_processor_name=self.metadata.source_processor_name,
+                source_processor_id=self.metadata.source_processor_id,
+                memmap_chunk_size=memmap_chunk_size
             )
-
-            ts_fp = open(self._memmap_paths[key]['timestamps'], 'w+b')
-            ts_fp.truncate(self._memmap_capacities[key] * np.dtype(np.float64).itemsize)
-            self._memmap_file_handles[key]['timestamps'] = ts_fp
-            self._memmaps[key]['timestamps'] = np.memmap(
-                ts_fp, dtype=np.float64, mode='r+', shape=(self._memmap_capacities[key],)
-            )
+            stream_path = writer.open()
+            self.stream_writers[key] = writer
             print(f"Started recording in: {stream_path}")
 
-        self._write_structure_oebin()
+            num_channels = self.xdaq.numDataStream * (16 if self.xdaq.rhs else 32)
+            stream_info = self.metadata.get_stream_info(
+                stream_name=config.stream_name,
+                sample_rate=self.sample_rate,
+                num_channels=num_channels,
+                bit_volts=config.bit_volts
+            )
+            stream_infos.append(stream_info)
+
+        self.metadata.write_structure_oebin(self.recording_path, stream_infos)
         self._is_recording = True
-
-    def _resize_memmaps(self, key: str, required_capacity: int):
-        new_capacity = self._memmap_capacities[key]
-        while new_capacity < required_capacity:
-            new_capacity += self.memmap_chunk_size_samples
-
-        for mmap_key in self._memmaps[key]:
-            self._memmaps[key][mmap_key].flush()
-        del self._memmaps[key]
-
-        fp_sn = self._memmap_file_handles[key]['sample_numbers']
-        fp_ts = self._memmap_file_handles[key]['timestamps']
-        fp_sn.truncate(new_capacity * np.dtype(np.int64).itemsize)
-        fp_ts.truncate(new_capacity * np.dtype(np.float64).itemsize)
-
-        self._memmaps[key] = {
-            'sample_numbers': np.memmap(fp_sn, dtype=np.int64, mode='r+', shape=(new_capacity,)),
-            'timestamps': np.memmap(fp_ts, dtype=np.float64, mode='r+', shape=(new_capacity,))
-        }
-        self._memmap_capacities[key] = new_capacity
-        print(
-            f"\nResized memmap files for stream '{key}' to capacity for "
-            f"{new_capacity // self.sample_rate} seconds."
-        )
 
     def stop_recording(self):
         if not self._is_recording:
             return
 
-        for key, stream_path in self.stream_paths.items():
-            self._file_handles[key].close()
+        for writer in self.stream_writers.values():
+            writer.close()
+            print(f"Stopped recording. Data saved in: {writer.stream_path}")
 
-            # Flush, then delete the memmap objects. This should release file locks.
-            for mmap_key in self._memmaps[key]:
-                if self._memmaps[key][mmap_key] is not None:
-                    self._memmaps[key][mmap_key].flush()
-            del self._memmaps[key]
-
-            # Close the file handles.
-            for fp_key in self._memmap_file_handles[key]:
-                self._memmap_file_handles[key][fp_key].close()
-
-            final_sample_count = self._sample_counts[key]
-
-            sn_mmap_path = self._memmap_paths[key]['sample_numbers']
-            if os.path.exists(sn_mmap_path) and final_sample_count > 0:
-                sn_mmap = np.memmap(
-                    sn_mmap_path, dtype=np.int64, mode='r', shape=(final_sample_count,)
-                )
-                np.save(os.path.join(stream_path, "sample_numbers.npy"), sn_mmap)
-                del sn_mmap
-                os.remove(sn_mmap_path)
-
-            ts_mmap_path = self._memmap_paths[key]['timestamps']
-            if os.path.exists(ts_mmap_path) and final_sample_count > 0:
-                ts_mmap = np.memmap(
-                    ts_mmap_path, dtype=np.float64, mode='r', shape=(final_sample_count,)
-                )
-                np.save(os.path.join(stream_path, "timestamps.npy"), ts_mmap)
-                del ts_mmap
-                os.remove(ts_mmap_path)
-
-            print(f"Stopped recording. Data saved in: {stream_path}")
-
+        self.stream_writers.clear()
         self._is_recording = False
 
     def write_data(self, samples: "Samples"):
@@ -232,31 +291,11 @@ class OpenEphysWriter:
         if n_samples == 0:
             return
 
-        for key in self.stream_paths.keys():
-            required_capacity = self._sample_counts[key] + n_samples
-            if required_capacity > self._memmap_capacities[key]:
-                self._resize_memmaps(key, required_capacity)
-
-            offset = self._sample_counts[key]
-            self._memmaps[key]['sample_numbers'][offset:offset + n_samples] = samples.sample_index
-            self._memmaps[key]['timestamps'][offset:offset + n_samples] = samples.timestamp.astype(
-                np.float64
-            ) / 1_000_000.0
-            self._sample_counts[key] += n_samples
+        for writer in self.stream_writers.values():
+            writer.write_sample_data(samples, n_samples)
 
         if self.xdaq.rhs:
-            amp_data_ac = samples.amp[..., 1]
-            reshaped_ac = amp_data_ac.reshape(n_samples, -1)
-            ac_int16 = (reshaped_ac.astype(np.int32) - OFFSET_AC).astype(np.int16)
-            self._file_handles['AC'].write(ac_int16.tobytes())
-
-            amp_data_dc = samples.amp[..., 0]
-            reshaped_dc = amp_data_dc.reshape(n_samples, -1)
-            dc_10bit = reshaped_dc & 0x3FE
-            dc_int16 = (dc_10bit.astype(np.int32) - OFFSET_DC).astype(np.int16)
-            self._file_handles['DC'].write(dc_int16.tobytes())
+            self.stream_writers['AC'].write_amp_data(samples.amp[..., 1], n_samples)
+            self.stream_writers['DC'].write_amp_data(samples.amp[..., 0], n_samples)
         else:
-            amp_data = samples.amp
-            reshaped_amp = amp_data.reshape(n_samples, -1)
-            amp_data_int16 = (reshaped_amp.astype(np.int32) - OFFSET_AC).astype(np.int16)
-            self._file_handles['continuous'].write(amp_data_int16.tobytes())
+            self.stream_writers['continuous'].write_amp_data(samples.amp, n_samples)
