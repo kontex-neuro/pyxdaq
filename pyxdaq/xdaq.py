@@ -941,7 +941,7 @@ class XDAQ:
             Callable[[Samples], None],
             Callable[[Samples | None, str | None], None],
         ]],
-        on_error: Optional[Callable[[str], None]] = None,
+        on_error: Optional[Callable[[str], None]],
     ):
         """
         Starts receiving data and provides parsed Samples objects to callbacks.
@@ -960,62 +960,51 @@ class XDAQ:
                   for both data and errors.
             on_error: An optional callback that is invoked only when an error occurs.
         """
-        callback_info = []
-        for cb in callbacks:
-            try:
-                sig = inspect.signature(cb)
-                arity = len(sig.parameters)
-                callback_info.append({'cb': cb, 'arity': arity})
-            except (ValueError, TypeError):
-                if on_error:
-                    on_error(
-                        f"Could not determine signature for callback {cb}. It will be ignored."
-                    )
+        if not callbacks:
+            raise ValueError("At least one callback must be provided")
+
+        sample_callbacks = []
+        sample_error_callbacks = []
+
+        for i, cb in enumerate(callbacks):
+            if not callable(cb):
+                raise ValueError(f"Callback at index {i} is not callable")
+
+            arity = len(inspect.signature(cb).parameters)
+
+            if arity == 1:
+                sample_callbacks.append(cb)
+            elif arity == 2:
+                sample_error_callbacks.append(cb)
+            else:
+                cb_name = getattr(cb, '__name__', f'<callback_{i}>')
+                raise ValueError(f"Callback {cb_name} has invalid signature")
 
         def _internal_callback(data: pyxdaq_device.DataView | None, error: str | None):
-            if error is not None:
-                if on_error:
+            try:
+                if error is not None:
                     on_error(error)
-                for info in callback_info:
-                    if info['arity'] == 2:
-                        try:
-                            info['cb'](None, error)
-                        except Exception as e:
-                            if on_error:
-                                on_error(
-                                    f"Callback {info['cb'].__name__} failed while handling error: {e}"
-                                )
-                return
-
-            if data is not None:
-                try:
-                    samples = self.buffer_to_samples(bytes(data))
-                except Exception as e:
-                    if on_error:
-                        on_error(f"Failed to parse data block: {e}")
-                    for info in callback_info:
-                        if info['arity'] == 2:
-                            try:
-                                info['cb'](None, f"Failed to parse data block: {e}")
-                            except Exception as e_inner:
-                                if on_error:
-                                    on_error(
-                                        f"Callback {info['cb'].__name__} failed "
-                                        f"while handling parsing error: {e_inner}"
-                                    )
+                    for cb in sample_error_callbacks:
+                        cb(None, error)
                     return
 
-                for info in callback_info:
-                    try:
-                        if info['arity'] == 1:
-                            info['cb'](samples)
-                        elif info['arity'] == 2:
-                            info['cb'](samples, None)
-                    except Exception as e:
-                        if on_error:
-                            on_error(
-                                f"Callback {info['cb'].__name__} failed during data processing: {e}"
-                            )
+                if data is None:
+                    return
+
+                try:
+                    samples = self.buffer_to_samples(bytes(data))
+                    for cb in sample_callbacks:
+                        cb(samples)
+                    for cb in sample_error_callbacks:
+                        cb(samples, None)
+                except Exception as e:
+                    parse_error = f"Failed to parse data block: {e}"
+                    on_error(parse_error)
+                    for cb in sample_error_callbacks:
+                        cb(None, parse_error)
+
+            except Exception as e:
+                on_error(f"Unhandled exception in callback: {e}")
 
         return self.start_receiving_buffer(_internal_callback)
 
