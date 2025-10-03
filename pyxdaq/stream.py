@@ -9,11 +9,6 @@ import numpy as np
 from .datablock import Samples
 
 
-class DeviceType(Enum):
-    RHD = auto()
-    RHS = auto()
-
-
 @dataclass
 class MemmapInfo:
     path: pathlib.Path

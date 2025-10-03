@@ -2,7 +2,6 @@ import signal
 import time
 
 from pyxdaq.datablock import Samples
-from pyxdaq.stream import DeviceType
 from pyxdaq.xdaq import get_XDAQ
 from pyxdaq.writer import OpenEphysWriter
 
@@ -91,7 +90,7 @@ def on_samples_received(samples: Samples):
     )
 
 
-with OpenEphysWriter(xdaq, root_path=".", device_type=DeviceType.RHD) as writer:
+with OpenEphysWriter(xdaq, root_path=".") as writer:
     with xdaq.start_receiving_samples(callbacks=[on_samples_received], on_error=on_error):
         # Kick off acquisition
         xdaq.start(continuous=True)

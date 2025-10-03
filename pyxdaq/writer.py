@@ -3,7 +3,7 @@ from typing import Dict
 
 from .datablock import Samples
 from .openephys import OpenEphysMetadata, RecordingPaths
-from .stream import (DeviceType, RHDStreamer, RHSStreamer, StreamWriter)
+from .stream import RHDStreamer, RHSStreamer, StreamWriter
 from .xdaq import XDAQ
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,6 @@ class OpenEphysWriter:
         self,
         xdaq: XDAQ,
         root_path: str,
-        device_type: DeviceType,
         record_node: str = "Record Node 101",
         gui_version: str = "0.6.4"
     ):
@@ -23,13 +22,10 @@ class OpenEphysWriter:
         self.paths = RecordingPaths.create(root_path, record_node)
         self.metadata = OpenEphysMetadata(gui_version=gui_version)
 
-        match device_type:
-            case DeviceType.RHS:
-                self.streamer = RHSStreamer()
-            case DeviceType.RHD:
-                self.streamer = RHDStreamer()
-            case _:
-                raise ValueError(f"Unsupported device type: {device_type}")
+        if self.xdaq.rhs:
+            self.streamer = RHSStreamer()
+        else:
+            self.streamer = RHDStreamer()
 
         self._is_recording = False
         self.stream_writers: Dict[str, StreamWriter] = {}
