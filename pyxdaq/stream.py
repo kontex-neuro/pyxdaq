@@ -157,7 +157,10 @@ class StreamWriter:
         # result_amp = (reshaped.astype(np.int32) -
         #               self.stream_config.offset).astype(np.float64) * self.stream_config.bit_volts
 
-        timestamps = samples.timestamp.astype(np.float64) / 1_000_000.0
+        if samples.timestamp is not None:
+            timestamps = samples.timestamp.astype(np.float64) / 1_000_000.0
+        else:
+            timestamps = samples.sample_index.astype(np.float64) / self.sample_rate
 
         self._files['sample_numbers']['handle'].write(samples.sample_index.tobytes())
         self._files['data']['handle'].write(result_amp.astype(np.int16).tobytes())
