@@ -1,11 +1,10 @@
 import struct
 from dataclasses import dataclass
 from typing import Union
+from functools import lru_cache
 
 import numpy as np
 
-_uint16le = np.dtype("u2").newbyteorder("<")
-_uint32le = np.dtype("u4").newbyteorder("<")
 _RHD_HEADER_MAGIC = 0xD7A22AAA38132A53
 _RHS_HEADER_MAGIC = 0x8D542C8A49712F0B
 
@@ -104,19 +103,13 @@ class Samples:
 class DataBlock:
     _samples: np.ndarray
 
-    @classmethod
-    def from_buffer(
-        cls,
+    @staticmethod
+    @lru_cache
+    def get_dtype(
         rhs: bool,
-        sample_size: int,
-        buffer: Union[bytes, bytearray, memoryview],
         datastreams: int,
         device_timestamp: bool,
-    ) -> "DataBlock":
-        magic = struct.unpack("<Q", buffer[:8])[0]
-        if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
-            raise ValueError(f"Invalid magic number: {magic:016X}")
-
+    ) -> np.dtype:
         fields = []
         fields.append(("magic", "<u8"))
         fields.append(("sample_index", "<u4"))
@@ -137,15 +130,24 @@ class DataBlock:
         fields.append(("adc", "<u2", (8,)))
         fields.append(("ttlin", "<u4", (1,)))
         fields.append(("ttlout", "<u4", (1,)))
+        return np.dtype(fields, align=False)
 
-        dtype = np.dtype(fields, align=False)
+    @staticmethod
+    def from_buffer(
+        rhs: bool,
+        sample_size: int,
+        buffer: Union[bytes, bytearray, memoryview],
+        datastreams: int,
+        device_timestamp: bool,
+    ) -> "DataBlock":
+        magic = struct.unpack("<Q", buffer[:8])[0]
+        if magic != (_RHS_HEADER_MAGIC if rhs else _RHD_HEADER_MAGIC):
+            raise ValueError(f"Invalid magic number: {magic:016X}")
+        dtype = DataBlock.get_dtype(rhs, datastreams, device_timestamp)
         if sample_size != dtype.itemsize:
             raise ValueError(f"Expected sample_size = {sample_size}, got = {dtype.itemsize}")
 
-        n_samples = len(buffer) // sample_size
-        samples = np.frombuffer(buffer, dtype=dtype, count=n_samples)
-
-        return cls(_samples=samples)
+        return DataBlock(np.frombuffer(buffer, dtype=dtype, count=len(buffer) // sample_size))
 
     def to_samples(self) -> Samples:
         s = self._samples

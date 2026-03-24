@@ -96,8 +96,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     rhs_options = [False, True]
-    datastreams_options = {False: range(0, 32 + 1, 8), True: range(0, 8 + 1, 2)}
-    chunk_sizes = [2**i for i in range(14, 23)]
+    datastreams_options = {False: range(0, 32 + 1, 8), True: range(0, 8 + 1, 4)}
+    chunk_sizes = [2**i for i in range(14, 23, 4)]
     configs = []
 
     for rhs in rhs_options:
