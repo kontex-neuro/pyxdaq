@@ -5,7 +5,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
 
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "colorlog",
     "dataclass_wizard",

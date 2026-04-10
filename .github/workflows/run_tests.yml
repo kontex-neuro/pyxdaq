@@ -14,7 +14,6 @@ jobs:
             { os: macos-15, arch: arm64 },
             { os: ubuntu-24.04, arch: x64 }
           ]
-        py: ["3.11", "3.12", "3.13"]
 
     runs-on: ${{ matrix.os_arch.os }}
 
@@ -22,8 +21,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: |
+            3.12
+            3.13
+
       - name: Install tox
         run: pipx install tox
 
       - name: Run tox
-        run: pipx run tox
+        run: tox

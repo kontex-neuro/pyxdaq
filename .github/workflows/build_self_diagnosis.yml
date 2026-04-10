@@ -11,12 +11,12 @@ jobs:
     name: ${{ matrix.os }}-build
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
@@ -44,7 +44,7 @@ jobs:
           -c ./scripts/self_diagnosis.py
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: self_diagnosis ${{ matrix.os }}
           path: dist/self_diagnosis
