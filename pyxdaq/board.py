@@ -66,7 +66,7 @@ class Board(device.Device):
             raise RuntimeError("Already receiving a stream")
 
         class SingleStream:
-            def __init__(self, board, stream):
+            def __init__(self, board: 'Board', stream: pyxdaq_device.DataStream | None):
                 self.board = board
                 self.stream = stream
 

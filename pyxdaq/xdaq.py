@@ -201,7 +201,8 @@ class XDAQ:
         self.ports = XDAQPorts.default(2, 1 if self.dev.rhs else 2, False if self.dev.rhs else True)
         if 'Device Timestamp' in self.dev.status.get('Capabilities', {}):
             self.device_timestamp = True
-            self.dev.raw.set_register_sync(0x1530, 1, 1)
+            # TODO: remove hardcoded register address
+            self.dev.raw.set_register_sync(0x1544, 1, 1)
         else:
             self.device_timestamp = False
 
@@ -879,16 +880,22 @@ class XDAQ:
         return self.dev.ReadFromBlockPipeOut(self.ep.PipeOutData, 1024, buffer)
 
     def runAndReadBuffer(self, samples) -> bytes:
+        self.flush()
         buffers = []
 
         sample_size = self.getSampleSizeBytes()
         total_size = samples * sample_size
+        error = None
 
-        def callback(data, error):
-            if error is not None:
-                print(error, sum(map(len, buffers)), total_size, self.is_running())
-            if data is not None:
-                buffers.append(bytearray(data))
+        def callback(data: pyxdaq_device.DataView | None, e: str | None):
+            nonlocal error
+            try:
+                if e is not None:
+                    error = e
+                if data is not None:
+                    buffers.append(data.numpy)
+            except Exception as e:
+                error = str(e)
 
         self.setMaxTimeStep(0)
         self.setContinuousRunMode(True)
@@ -906,14 +913,18 @@ class XDAQ:
         ):
             self.run()
             start = time.time()
-            while sum(map(len, buffers)) < total_size:
+            while (sum(map(len, buffers)) < total_size) and (error is None):
                 if time.time() - start > (1 + sample_time):
                     raise TimeoutError("Timeout getting samples")
                 time.sleep(0.01)
             self.setContinuousRunMode(False)
+
+        if error is not None:
+            raise RuntimeError(f"Error receiving data: {error}")
+
         self.flush()
 
-        return b''.join(buffers)[:total_size]
+        return np.concatenate(buffers)[:total_size]
 
     def runAndReadDataBlock(self, samples) -> DataBlock:
         buffer = self.runAndReadBuffer(samples)
@@ -992,7 +1003,10 @@ class XDAQ:
                     return
 
                 try:
-                    samples = self.buffer_to_samples(bytes(data))
+                    samples = DataBlock.from_buffer(
+                        self.rhs, self.getSampleSizeBytes(), bytes(data), self.numDataStream,
+                        self.device_timestamp
+                    ).to_samples()
                     for cb in sample_callbacks:
                         cb(samples)
                     for cb in sample_error_callbacks:
@@ -1316,15 +1330,6 @@ class XDAQ:
         )
 
         return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
-
-    def buffer_to_samples(self, buffer: bytes) -> Samples:
-        sample_size = self.getSampleSizeBytes()
-        n_streams = self.numDataStream
-        block = DataBlock.from_buffer(
-            self.rhs, sample_size, buffer, n_streams, self.device_timestamp
-        )
-        samples = block.to_samples()
-        return samples
 
 
 def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_headstage: bool = False):
