@@ -1004,7 +1004,7 @@ class XDAQ:
 
                 try:
                     samples = DataBlock.from_buffer(
-                        self.rhs, self.getSampleSizeBytes(), bytes(data), self.numDataStream,
+                        self.rhs, self.getSampleSizeBytes(), data.numpy, self.numDataStream,
                         self.device_timestamp
                     ).to_samples()
                     for cb in sample_callbacks:
