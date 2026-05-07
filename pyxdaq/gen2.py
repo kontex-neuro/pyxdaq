@@ -10,20 +10,25 @@ def upload_waveform(xdaq: XDAQ, waveform: np.ndarray, idx: int, divisor: int):
     if waveform.dtype != np.uint16:
         raise TypeError(f'Only 16 bits resolution for waveform, get {waveform.dtype}')
     for i, val in enumerate(waveform.astype(np.uint32)):
-        xdaq.dev.set_register(0x2008 + idx * 8, int(val) | (i << 16) | (1 << 31), 0xFFFFFFFF)
-    xdaq.dev.set_register(0x200C + idx * 8, divisor | (len(waveform) - 1) << 16, 0xFFFFFFFF)
+        xdaq.dev.raw.set_register_sync(
+            0x2008 + idx * 8,
+            int(val) | (i << 16) | (1 << 31), 0xFFFFFFFF
+        )
+    xdaq.dev.raw.set_register_sync(
+        0x200C + idx * 8, divisor | (len(waveform) - 1) << 16, 0xFFFFFFFF
+    )
 
 
 def config_waveform(xdaq: XDAQ, enable: int):
-    xdaq.dev.set_register(0x2004, enable, 15)  # enable
-    xdaq.dev.set_register(0x2000, enable, 15)  # reset enabled
+    xdaq.dev.raw.set_register_sync(0x2004, enable, 15)  # enable
+    xdaq.dev.raw.set_register_sync(0x2000, enable, 15)  # reset enabled
 
 
 def config_channel(xdaq: XDAQ, channel: int, waveform: Union[int, None]):
     if waveform is None:
-        xdaq.dev.set_register(0x2028 + 4 * channel, 0 | (0 << 31), 0xFFFFFFFF)
+        xdaq.dev.raw.set_register_sync(0x2028 + 4 * channel, 0 | (0 << 31), 0xFFFFFFFF)
     else:
-        xdaq.dev.set_register(0x2028 + 4 * channel, waveform | (1 << 31), 0xFFFFFFFF)
+        xdaq.dev.raw.set_register_sync(0x2028 + 4 * channel, waveform | (1 << 31), 0xFFFFFFFF)
 
 
 def get_sine(period, amp=32768):
