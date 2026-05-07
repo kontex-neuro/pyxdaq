@@ -15,9 +15,9 @@ def test_find_package_resources():
 
 def test_device_managers_loadable():
     from pylibxdaq import pyxdaq_device
-    from pylibxdaq.managers import DeviceManagerPaths
+    from pylibxdaq.managers import DeviceManagerDir
 
-    for path in DeviceManagerPaths:
+    for path in DeviceManagerDir.glob("*device_manager*"):
         manager = pyxdaq_device.get_device_manager(str(path))
         info = manager.info()
         parsed = json.loads(info)
