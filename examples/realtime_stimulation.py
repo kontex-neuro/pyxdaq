@@ -55,10 +55,10 @@ def on_samples_received(samples: Samples):
 
     if max_amp > uv_threshold:
         # Enable manual trigger
-        xdaq.manual_trigger(0, True)
+        xdaq.stim.trigger(0, True)
         print(f"Stim triggered at sample index:{samples.sample_index[0]:8d}")
         # Disable manual trigger
-        xdaq.manual_trigger(0, False)
+        xdaq.stim.trigger(0, False)
 
 
 # Enable stimulation needs to be done BEFORE acquisition

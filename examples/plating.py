@@ -138,22 +138,22 @@ def send_pulses(
     )
 
     # Enable software trigger
-    xdaq.manual_trigger(software_trigger_id, True)
+    xdaq.stim.trigger(software_trigger_id, True)
 
     # Calculate the number of steps to run, the number of steps should be multiple of 128 to avoid alignment error
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
 
     # Start running
-    xdaq.set_stim_enable(True)
+    xdaq.stim.enable()
     # Speed up the process by discarding the reading of the data block
     # It's possible to run without blocking the script, but this will require more complex logic
     # See acquire_raw_data function for more fine-grained control
     xdaq.acquire_raw_data(run_steps)
-    xdaq.set_stim_enable(False)
+    xdaq.stim.disable()
     # Stop running
 
     # Disable software trigger after the run
-    xdaq.manual_trigger(software_trigger_id, False)
+    xdaq.stim.trigger(software_trigger_id, False)
     # Disable the stim, a stim can run multiple times, here we set the stim every time for demonstration
     disable_stim()
 

@@ -18,6 +18,7 @@ from .datablock import DataBlock, Samples, get_sample_size
 from .legacy import _LegacyMixin
 from .rhd_driver import RHDDriver
 from .rhs_driver import RHSDriver
+from .stim import StimSubsystem
 
 
 class XDAQModel(Enum):
@@ -179,25 +180,19 @@ class XDAQPorts(JSONWizard):
             yield self.streams[chip * streams_per_chip:(chip + 1) * streams_per_chip]
 
 
-def stim_trigger(source: int, event: TriggerEvent, polarity: TriggerPolarity, enabled: bool):
-    return source | event.value << 5 | polarity.value << 6 | enabled << 7
-
-
-def stim_params(pulses: int, shape: StimShape, start_polarity: StartPolarity):
-    return (pulses - 1) | shape.value << 8 | start_polarity.value << 10
-
-
 class XDAQ(_LegacyMixin):
     dev: Board
     ports: XDAQPorts
     rhs: bool
     ep: Union[RHD, RHS]
+    stim: Union["StimSubsystem", None]
     sampleRate: SampleRate = SampleRate.SampleRate30000Hz
 
     def __init__(self, dev: Board):
         self.dev = dev
         self.ep = RHS if self.dev.rhs else RHD
         self.rhs = self.dev.rhs
+        self.stim = StimSubsystem(self) if self.rhs else None
         self.ports = XDAQPorts.default(2, 1 if self.dev.rhs else 2, False if self.dev.rhs else True)
         if 'Device Timestamp' in self.dev.status.get('Capabilities', {}):
             self.device_timestamp = True
@@ -550,14 +545,6 @@ class XDAQ(_LegacyMixin):
         v = sum(p * (1 << i) for i, p in enumerate(settle)) | (global_settle * 0x10)
         self.dev.set_register(self.ep.WireInGlobalSettleSelect, v, 0x1f)
 
-    def set_stim_enable(self, enabled: bool):
-        """
-        Enable or disable stimulation for XDAQ
-        """
-        if self.ep != RHS:
-            return
-        self.dev.set_register(self.ep.WireInStimCmdMode, enabled * 0x1, 0x1)
-
     def enable_dc_amp_convert(self, enabled: bool):
         if self.ep != RHS:
             return
@@ -575,92 +562,6 @@ class XDAQ(_LegacyMixin):
         value = max(0, min(65535, value))
         self.dev.set_register(self.ep.WireInAdcThreshold, value)
 
-    def program_stim_reg(self, stream: int, channel: int, reg: StimRegister, value: int):
-        # stream(0-7) * channel(0-15) = max 128
-        # WireInStimRegAddr[3:0]: StimRegAddress
-        # WireInStimRegAddr[7:4]: StimRegChannel 0-15 (channel on each RHS2116)
-        # WireInStimRegAddr[12:8]: StimRegModule 0-7 spi
-        # WireInStimRegWord[15:0]: StimProgWord
-        # 14 address
-        # 0 TriggerParams
-        # 1 StimParams
-        # events 16 bits t + event * 1/sample_rate
-        # 2 EventAmpSettleOn
-        # 3 EventAmpSettleOff
-        # 4 EventStartStim
-        # 5 EventStimPhase2
-        # 6 EventStimPhase3
-        # 7 EventEndStim
-        # 8 EventRepeatStim
-        # 9 EventChargeRecovOn
-        # 10 EventChargeRecovOff
-        # 11 EventAmpSettleOnRepeat
-        # 12 EventAmpSettleOffRepeat
-        # 13 EventEnd
-        self.dev.set_register(
-            self.ep.WireInStimRegAddr, (stream << 8) | (channel << 4) | reg.value, update=False
-        )
-        self.dev.set_register(self.ep.WireInStimRegWord, value)
-        self.dev.send_trigger(self.ep.TrigInRamAddrReset, 1)
-
-    def set_headstage_sequencer(self):
-        NEVER = 0xffff
-        for stream in range(8):
-            for channel in range(16):
-                self.program_stim_reg(
-                    stream, channel, StimRegister.Trigger,
-                    stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
-                )
-                self.program_stim_reg(
-                    stream, channel, StimRegister.Param,
-                    stim_params(1, StimShape.Biphasic, StartPolarity.cathodic)
-                )
-                self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOn, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventStartStim, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventStimPhase2, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventStimPhase3, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventEndStim, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventRepeatStim, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOff, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventChargeRecovOn, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventChargeRecovOff, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOnRepeat, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOffRepeat, NEVER)
-                self.program_stim_reg(stream, channel, StimRegister.EventEnd, 65534)
-
-        for stream in range(8, 16):
-            self.program_stim_reg(
-                stream, 0, StimRegister.Trigger,
-                stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
-            )
-            self.program_stim_reg(
-                stream, 0, StimRegister.Param,
-                stim_params(1, StimShape.Monophasic, StartPolarity.cathodic)
-            )
-            self.program_stim_reg(stream, 0, StimRegister.EventStartStim, 0)
-            self.program_stim_reg(stream, 0, StimRegister.EventStimPhase2, NEVER)
-            self.program_stim_reg(stream, 0, StimRegister.EventStimPhase3, NEVER)
-            self.program_stim_reg(stream, 0, StimRegister.EventEndStim, 200)
-            self.program_stim_reg(stream, 0, StimRegister.EventRepeatStim, NEVER)
-            self.program_stim_reg(stream, 0, StimRegister.EventEnd, 240)
-            self.program_stim_reg(stream, 0, StimRegister.EventChargeRecovOn, 32768)
-            self.program_stim_reg(stream, 0, StimRegister.EventChargeRecovOff, 32768 + 3200)
-            self.program_stim_reg(stream, 0, StimRegister.EventAmpSettleOnRepeat, 32768 - 3200)
-
-        for channel in range(16):
-            self.program_stim_reg(
-                16, channel, StimRegister.Trigger,
-                stim_trigger(0, TriggerEvent.Edge, TriggerPolarity.Low, False)
-            )
-            self.program_stim_reg(
-                16, channel, StimRegister.Param,
-                stim_params(3, StimShape.Biphasic, StartPolarity.cathodic)
-            )
-            self.program_stim_reg(16, channel, StimRegister.EventStartStim, NEVER)
-            self.program_stim_reg(16, channel, StimRegister.EventEndStim, NEVER)
-            self.program_stim_reg(16, channel, StimRegister.EventRepeatStim, NEVER)
-            self.program_stim_reg(16, channel, StimRegister.EventEnd, 65534)
-
     def initialize(self):
         self.enable_auxcmd_on_stream('all')
         self.set_global_settle_policy([False, False, False, False], False)
@@ -669,7 +570,8 @@ class XDAQ(_LegacyMixin):
             self.set_auxcmd_bank('all', auxCommandSlot, 0)
         for auxCommandSlot in range(3 + int(self.rhs)):
             self.set_auxcmd_length(auxCommandSlot, 0, 0)
-        self.set_stim_enable(False)
+        if self.stim:
+            self.stim.disable()
         self.set_continuous_run_mode(True)
         self.set_max_timestep(2**32 - 1)
         self.set_cable_delay('all', self.delay_from_cable_length(3.0, 30000, 'ft'))
@@ -701,8 +603,8 @@ class XDAQ(_LegacyMixin):
         self.enable_dac_highpass_filter(False)
 
         self.set_analog_in_trigger_threshold(1.65)
-        if self.rhs:
-            self.set_headstage_sequencer()
+        if self.stim:
+            self.stim.reset_sequencers()
 
     def upload_auxcmd(self, commandList: np.ndarray, auxCommandSlot, bank):
         if auxCommandSlot < 0 or auxCommandSlot > (2 + int(self.rhs)):
@@ -862,15 +764,15 @@ class XDAQ(_LegacyMixin):
         self.enable_dac(channel, True)
 
     def start(self, *, continuous: bool = None):
-        if self.rhs:
-            self.set_stim_enable(True)
+        if self.stim:
+            self.stim.enable()
         if continuous is not None:
             self.set_continuous_run_mode(continuous)
         self.run()
 
     def stop(self, *, wait: bool = False):
-        if self.rhs:
-            self.set_stim_enable(False)
+        if self.stim:
+            self.stim.disable()
         self.set_max_timestep(0)
         self.set_continuous_run_mode(False)
         if wait:
@@ -1108,104 +1010,6 @@ class XDAQ(_LegacyMixin):
         self.acquire_raw_data(samples=128)  # upload aux commands
         self.set_auxcmd_bank('all', 2, 2 if fastSettle else 1)
 
-    def manual_trigger(self, trigger: int, enable: bool):
-        """
-        Turn on or off manual triggers for a particular trigger event.
-        """
-        if not self.rhs:
-            return
-        self.dev.set_register(RHS.WireInManualTriggers, int(enable) << trigger, 1 << trigger)
-
-    def set_stim(
-        self, stream: int, channel: int, polarity: StartPolarity, shape: StimShape, delay_ms: float,
-        duration_phase1_ms: float, duration_phase2_ms: float, duration_phase3_ms: float,
-        amp_neg_mA: float, amp_pos_mA: float, pulses: int, duration_pulse_ms: float,
-        pre_ampsettle_ms: float, post_ampsettle_ms: float, trigger: TriggerEvent,
-        trigger_source: int, trigger_pol: TriggerPolarity, step_size: StimStepSize, enable: bool,
-        post_charge_recovery_ms: float
-    ):
-        dt = 1 / self.sampleRate.value[2]
-        if not enable:
-            amp_neg_mA = 0
-            amp_pos_mA = 0
-        self.program_stim_reg(
-            stream, channel, StimRegister.Trigger,
-            stim_trigger(trigger_source, trigger, trigger_pol, enable)
-        )
-        self.program_stim_reg(
-            stream, channel, StimRegister.Param, stim_params(pulses, shape, polarity)
-        )
-        t0 = int(delay_ms * 1e-3 / dt)
-        t1 = int(duration_phase1_ms * 1e-3 / dt) + t0
-        t2 = int(duration_phase2_ms * 1e-3 / dt) + t1
-        t3 = int(duration_phase3_ms * 1e-3 / dt) + t2
-        t4 = int(duration_pulse_ms * 1e-3 / dt) + t3
-        if pre_ampsettle_ms > 0:
-            t_ampsettle_on = t0 - int(pre_ampsettle_ms * 1e-3 / dt)
-        else:
-            t_ampsettle_on = t0
-        if post_ampsettle_ms > 0:
-            t_ampsettle_off = int(post_ampsettle_ms * 1e-3 / dt) + t3
-        else:
-            t_ampsettle_off = t3
-
-        if post_charge_recovery_ms > 0:
-            t_charge_recovery_on = t3
-            t_charge_recovery_off = int(post_charge_recovery_ms * 1e-3 / dt) + t_charge_recovery_on
-        else:
-            t_charge_recovery_on = 0xFFFF
-            t_charge_recovery_off = 0xFFFF
-
-        self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOn, t_ampsettle_on)
-        self.program_stim_reg(stream, channel, StimRegister.EventStartStim, t0)
-        self.program_stim_reg(stream, channel, StimRegister.EventStimPhase2, t1)
-        self.program_stim_reg(stream, channel, StimRegister.EventStimPhase3, t2)
-        self.program_stim_reg(stream, channel, StimRegister.EventEndStim, t3)
-        self.program_stim_reg(stream, channel, StimRegister.EventRepeatStim, t4)
-        self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOff, t_ampsettle_off)
-        self.program_stim_reg(
-            stream, channel, StimRegister.EventChargeRecovOn, t_charge_recovery_on
-        )
-        self.program_stim_reg(
-            stream, channel, StimRegister.EventChargeRecovOff, t_charge_recovery_off
-        )
-        self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOnRepeat, 0xFFFF)
-        self.program_stim_reg(stream, channel, StimRegister.EventAmpSettleOffRepeat, 0xFFFF)
-        self.program_stim_reg(stream, channel, StimRegister.EventEnd, t4)
-        self.enable_auxcmd_on_stream(stream)
-        reg = self.getreg(self.sampleRate)
-        reg.set_dsp_cutoff_freq(0.5)
-        reg.setStimStepSize(step_size)
-        cmd = reg.createCommandListSetStimMagnitudes(
-            magnitude_neg=int(min(255, round(amp_neg_mA * 1e6 / step_size.nA))) if enable else 0,
-            magnitude_pos=int(min(255, round(amp_pos_mA * 1e6 / step_size.nA))) if enable else 0,
-            channel=channel
-        )
-        self.upload_auxcmd(cmd, 0, 0)
-        self.set_auxcmd_length(0, 0, len(cmd) - 1)
-
-        cmd = reg.dummy(8192)
-        for aux in [1, 2, 3]:
-            self.upload_auxcmd(cmd, aux, 0)
-        self.set_stim_enable(False)
-        self.enable_auxcmd_on_stream(stream)
-        self.acquire_raw_data(samples=128)
-
-        reg.set_upper_bandwidth(7500)
-        reg.set_lower_bandwidth_a(1000)
-        reg.set_lower_bandwidth_b(1)
-
-        cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=True)
-        self.upload_auxcmd(cmd, 0, 0)
-        self.set_auxcmd_length(0, 0, len(cmd) - 1)
-        self.acquire_raw_data(samples=128)
-
-        cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
-        self.upload_auxcmd(cmd, 0, 0)
-        self.set_auxcmd_length(0, 0, len(cmd) - 1)
-        self.enable_auxcmd_on_stream('all')
-        self.acquire_raw_data(samples=128)
-
     def send_ztest_signals(
         self,
         frequency: impedance.Frequency,
@@ -1213,7 +1017,8 @@ class XDAQ(_LegacyMixin):
         channels: Optional[List[int]] = None,
         progress: bool = True,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
-        self.set_stim_enable(False)
+        if self.stim:
+            self.stim.disable()
         for i in range(8):
             self.enable_external_dig_out(i, False)
         for i in range(8):

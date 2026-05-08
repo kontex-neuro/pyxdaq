@@ -19,12 +19,12 @@ def send_pulses(
         trigger_source=24,
         **pulses(pulse_current_mA, pulse_frequency)
     )
-    xdaq.manual_trigger(0, True)
+    xdaq.stim.trigger(0, True)
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
-    xdaq.set_stim_enable(True)
+    xdaq.stim.enable()
     samples = xdaq.acquire_samples(run_steps)
-    xdaq.set_stim_enable(False)
-    xdaq.manual_trigger(0, False)
+    xdaq.stim.disable()
+    xdaq.stim.trigger(0, False)
     disable_stim()
     return samples
 

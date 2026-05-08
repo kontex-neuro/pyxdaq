@@ -82,12 +82,27 @@ class _LegacyMixin:
     # ── Stim ──────────────────────────────────────────────────────────────
 
     def setStimCmdMode(self: "XDAQ", enabled: bool):
-        _deprecated("setStimCmdMode", "set_stim_enable")
-        return self.set_stim_enable(enabled)
+        _deprecated("setStimCmdMode", "stim.enable/stim.disable")
+        if enabled:
+            self.stim.enable()
+        else:
+            self.stim.disable()
 
     def programStimReg(self: "XDAQ", stream, channel, reg, value):
-        _deprecated("programStimReg", "program_stim_reg")
-        return self.program_stim_reg(stream, channel, reg, value)
+        _deprecated("programStimReg", "stim.program_reg")
+        return self.stim.program_reg(stream, channel, reg, value)
+
+    def manual_trigger(self: "XDAQ", trigger: int, enable: bool):
+        _deprecated("manual_trigger", "stim.trigger")
+        self.stim.trigger(trigger, enable)
+
+    def set_headstage_sequencer(self: "XDAQ"):
+        _deprecated("set_headstage_sequencer", "stim.reset_sequencers")
+        self.stim.reset_sequencers()
+
+    def set_stim(self: "XDAQ", **kwargs):
+        _deprecated("set_stim", "stim.configure")
+        self.stim.configure(**kwargs)
 
     # ── Data streams ──────────────────────────────────────────────────────
 
