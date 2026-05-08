@@ -56,7 +56,7 @@ args = get_args()
 xdaq = get_XDAQ(rhs=True)
 print(xdaq.ports)
 
-if xdaq.numDataStream > 2:
+if xdaq.num_enabled_datastream > 2:
     raise ValueError('This script is only compatible with one X3SR32 headstage')
 
 if args.periods is not None:

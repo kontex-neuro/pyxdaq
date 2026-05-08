@@ -141,12 +141,12 @@ def send_pulses(
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
 
     # Start running
-    xdaq.setStimCmdMode(True)
+    xdaq.set_stim_enable(True)
     # Speed up the process by discarding the reading of the data block
     # It's possible to run without blocking the script, but this will require more complex logic
-    # See runAndReadDataBlock function for more fine-grained control
-    xdaq.runAndReadDataBlock(run_steps)
-    xdaq.setStimCmdMode(False)
+    # See acquire_raw_data function for more fine-grained control
+    xdaq.acquire_raw_data(run_steps)
+    xdaq.set_stim_enable(False)
     # Stop running
 
     # Disable software trigger after the run

@@ -20,9 +20,9 @@ xdaq = get_XDAQ()
 
 # Enable all streams even if no headstages are attached
 # Remove this line for doing a real experiment
-xdaq.enableDataStream("all", True)
+xdaq.config_data_stream("all", True)
 
-frame_size = xdaq.getSampleSizeBytes()
+frame_size = xdaq.sample_size_in_bytes()
 sample_rate = xdaq.sampleRate.rate
 print(
     f"Frame size: {frame_size} bytes @ {sample_rate} Hz = "
@@ -33,7 +33,7 @@ bytes_per_sec = frame_size * sample_rate
 
 total_bytes_received = 0
 recent_events = []
-num_streams = xdaq.numDataStream
+num_streams = xdaq.num_enabled_datastream
 start_time = time.time()
 
 

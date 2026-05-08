@@ -1,6 +1,5 @@
 import numpy as np
 
-from pyxdaq.constants import RHS
 from pyxdaq.datablock import Samples, adc2v
 from pyxdaq.stim import enable_stim, pulses
 from pyxdaq.xdaq import XDAQ, get_XDAQ
@@ -20,12 +19,12 @@ def send_pulses(
         trigger_source=24,
         **pulses(pulse_current_mA, pulse_frequency)
     )
-    xdaq.dev.SetWireInValue(RHS.WireInManualTriggers, 0x1)
+    xdaq.manual_trigger(0, True)
     run_steps = (int(duration_ms / 1000 * xdaq.sampleRate.rate) + 127) // 128 * 128
-    xdaq.setStimCmdMode(True)
-    samples = xdaq.runAndReadDataBlock(run_steps).to_samples()
-    xdaq.setStimCmdMode(False)
-    xdaq.dev.SetWireInValue(RHS.WireInManualTriggers, 0x0)
+    xdaq.set_stim_enable(True)
+    samples = xdaq.acquire_samples(run_steps)
+    xdaq.set_stim_enable(False)
+    xdaq.manual_trigger(0, False)
     disable_stim()
     return samples
 

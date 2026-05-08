@@ -38,7 +38,7 @@ with OpenEphysWriter(xdaq, root_path=".") as writer:
         while is_running:
             if time.time() - ttl_start_time >= ttl_period:
                 ttl_is_on = not ttl_is_on
-                xdaq.setTTLout('all', ttl_is_on)
+                xdaq.set_ttl_out('all', ttl_is_on)
                 ttl_start_time = time.time()
             time.sleep(0.001)
 
