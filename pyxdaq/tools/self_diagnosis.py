@@ -54,7 +54,11 @@ def run_diagnosis(console: Console):
             yield ('info_parse_error', str(e))
 
     try:
-        from pylibxdaq.managers import manager_paths
+        from pylibxdaq.managers import DeviceManagerDir
+        manager_paths = [
+            p for p in DeviceManagerDir.iterdir()
+            if p.suffix in ('.dylib', '.so', '.dll') and p.stem.endswith('_device_manager')
+        ]
         results['Device Managers'] = {
             str(manager_path): {
                 k: r
@@ -97,12 +101,12 @@ def run_diagnosis(console: Console):
 def check_xdaq(console: Console, device):
     device_results = {}
     try:
-        from pyxdaq.board import Board, DeviceSetup
-        assert isinstance(device, DeviceSetup)
+        from pyxdaq.board import Board, BoardInfo
+        assert isinstance(device, BoardInfo)
 
-        with Board(device) as board:
-            device_results['xdaq_info'] = str(board.dev.get_info())
-            device_results['xdaq_status'] = str(board.dev.get_status())
+        with device.create() as board:
+            device_results['xdaq_info'] = str(board.raw.get_info())
+            device_results['xdaq_status'] = str(board.raw.get_status())
             json.loads(device_results['xdaq_info'])
             json.loads(device_results['xdaq_status'])
             console.print('[OK]', style='bold green')
@@ -120,8 +124,8 @@ def check_xdaq(console: Console, device):
     try:
         from pyxdaq.xdaq import XDAQ
         from pyxdaq.constants import SampleRate
-        with Board(device.with_mode('rhd')) as board:
-            device_results['fpga_rhd'] = board.dev.get_status()
+        with device.with_mode('rhd').create() as board:
+            device_results['fpga_rhd'] = board.raw.get_status()
             xdaq = XDAQ(board)
             xdaq.initialize()
             xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
@@ -152,8 +156,8 @@ def check_xdaq(console: Console, device):
 
     console.print('\nDetecting Stim-Record X-Headstages ...', end='')
     try:
-        with Board(device.with_mode('rhs')) as board:
-            device_results['fpga_rhs'] = board.dev.get_status()
+        with device.with_mode('rhs').create() as board:
+            device_results['fpga_rhs'] = board.raw.get_status()
             xdaq = XDAQ(board)
             xdaq.initialize()
             xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)

@@ -3,7 +3,7 @@
 ## Installation
 
 ### Requirements
-- **Python** ≥ 3.11  
+- **Python** ≥ 3.12 (required by `pylibxdaq` which uses the Python Stable ABI)  
 - **XDAQ** drivers installed and your device/headstage connected
 
 ### From PyPI
