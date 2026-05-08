@@ -60,7 +60,46 @@ def run_diagnosis(console: Console):
         console.print("  [dim]Install with: pip install pyxdaq[/dim]")
         return
 
-    # ─── Step 2: Device manager libraries ───
+    # ─── Step 2: Hardware Detection (OS-level) ───
+    step(console, "Hardware Detection (OS-level)")
+    from pyxdaq.tools.hardware_detect import detect_xdaq_hardware, OPALKELLY_USB_VID, XDAQ_PCIE_VID, XDAQ_PCIE_DID
+    hw = detect_xdaq_hardware()
+    results['hardware'] = {
+        'gen1': [{
+            'name': d.name,
+            'serial': d.serial,
+            'location': d.location
+        } for d in hw['gen1']],
+        'gen2': [{
+            'name': d.name,
+            'location': d.location,
+            **d.extra
+        } for d in hw['gen2']],
+        'errors': hw['errors'],
+    }
+
+    hw_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
+    hw_table.add_column("Bus", style="white", width=30)
+    hw_table.add_column("Found", justify="center", width=7)
+    hw_table.add_column("Details", style="dim")
+    gen1_details = ", ".join(f"{d.name} ({d.serial})" for d in hw['gen1']) if hw['gen1'] else "—"
+    gen2_details = ", ".join(f"{d.location}" for d in hw['gen2']) if hw['gen2'] else "—"
+    hw_table.add_row(
+        f"Gen1 USB  (VID {OPALKELLY_USB_VID:#06x})",
+        PASS if hw['gen1'] else Text("—", style="dim"),
+        gen1_details,
+    )
+    hw_table.add_row(
+        f"Gen2 PCIe (VID {XDAQ_PCIE_VID:#06x}:{XDAQ_PCIE_DID:#06x})",
+        PASS if hw['gen2'] else Text("—", style="dim"),
+        gen2_details,
+    )
+    console.print(hw_table)
+    if hw['errors']:
+        for e in hw['errors']:
+            console.print(f"  [yellow]⚠ {e}[/yellow]")
+
+    # ─── Step 3: Device manager libraries ───
     step(console, "Device Manager Libraries")
 
     def try_load_device_manager(path: Path):
@@ -102,11 +141,13 @@ def run_diagnosis(console: Console):
         names = [r.get('name') for r in mgr_results.values() if 'name' in r]
         missing = []
         if 'XDAQ OpalKelly USB' not in names:
-            missing.append('Gen1 (OpalKelly USB)')
+            missing.append(('Gen1 (OpalKelly USB)', bool(hw['gen1'])))
         if 'XDAQ Thunderbolt' not in names:
-            missing.append('Gen2 (Thunderbolt)')
-        if missing:
-            for m in missing:
+            missing.append(('Gen2 (Thunderbolt)', bool(hw['gen2'])))
+        for m, hw_present in missing:
+            if hw_present:
+                console.print(f"  [red]✗ {m} driver not found, but hardware detected on bus![/red]")
+            else:
                 console.print(f"  [yellow]⚠ {m} driver not found[/yellow]")
     except Exception as e:
         results['Device Managers'] = str(e)
@@ -114,14 +155,21 @@ def run_diagnosis(console: Console):
         console.print("  [dim]Reinstall pylibxdaq or contact KonteX support.[/dim]")
         return
 
-    # ─── Step 3: Device enumeration ───
+    # ─── Step 4: Device enumeration ───
     step(console, "Connected Devices")
     try:
         from pyxdaq.board import Board
         device_list = Board.list_devices()
         if len(device_list) == 0:
-            console.print(f"  {FAIL}  No XDAQ devices found.")
-            console.print("  [dim]Check USB/Thunderbolt connections and power.[/dim]")
+            console.print(f"  {FAIL}  No XDAQ devices found by driver.")
+            hw_total = len(hw['gen1']) + len(hw['gen2'])
+            if hw_total > 0:
+                console.print(
+                    f"  [yellow]⚠ {hw_total} device(s) detected on bus but driver can't open them.[/yellow]"
+                )
+                console.print("  [dim]Try reinstalling pylibxdaq or updating firmware.[/dim]")
+            else:
+                console.print("  [dim]Check USB/Thunderbolt connections and power.[/dim]")
             results['devices'] = []
             return
         console.print(f"  Found [bold]{len(device_list)}[/bold] device(s)\n")
