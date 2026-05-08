@@ -29,7 +29,7 @@ class Board(device.Device):
     def list_devices() -> List[BoardInfo]:
         return [BoardInfo(**d.__dict__) for d in device.list_devices()]
 
-    def GetWireOutValue(self, addr: EndPoints, update: bool = True) -> int:
+    def read_register(self, addr: EndPoints, update: bool = True) -> int:
         if update:
             r = self.raw.get_register_sync(addr.value)
             if r is None:
@@ -38,7 +38,7 @@ class Board(device.Device):
         else:
             return self.raw.get_register(addr.value)
 
-    def SetWireInValue(
+    def set_register(
         self, addr: EndPoints, value: int, mask: int = 0xFFFFFFFF, update: bool = True
     ):
         if update:
@@ -46,14 +46,11 @@ class Board(device.Device):
         else:
             self.raw.set_register(addr.value, value, mask)
 
-    def ActivateTriggerIn(self, addr: EndPoints, value: int):
+    def send_trigger(self, addr: EndPoints, value: int):
         self.raw.trigger(addr.value, value)
 
-    def WriteToBlockPipeIn(self, epAddr: EndPoints, data: bytearray):
+    def write_data(self, epAddr: EndPoints, data: bytearray):
         return self.raw.write(epAddr.value, data)
-
-    def ReadFromBlockPipeOut(self, epAddr: EndPoints, data: bytearray):
-        return self.raw.read(epAddr.value, data)
 
     def start_receiving_aligned_buffer(
         self,
@@ -66,6 +63,7 @@ class Board(device.Device):
             raise RuntimeError("Already receiving a stream")
 
         class SingleStream:
+
             def __init__(self, board: 'Board', stream: pyxdaq_device.DataStream | None):
                 self.board = board
                 self.stream = stream
@@ -85,7 +83,7 @@ class Board(device.Device):
             ),
         )
 
-    def SendTrig(
+    def set_register_indirect(
         self,
         trig: EndPoints,
         bit: int,

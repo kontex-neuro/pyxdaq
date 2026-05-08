@@ -1,7 +1,7 @@
 import struct
 from dataclasses import dataclass
-from typing import Union
 from functools import lru_cache
+from typing import Union
 
 import numpy as np
 

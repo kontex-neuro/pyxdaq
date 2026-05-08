@@ -71,7 +71,7 @@ class OpenEphysWriter:
             stream_info = self.metadata.get_stream_info(
                 stream_name=config.stream_name,
                 sample_rate=self.sample_rate,
-                num_channels=self.xdaq.numDataStream * self.streamer.num_channels(),
+                num_channels=self.xdaq.num_enabled_datastream * self.streamer.num_channels(),
                 bit_volts=config.bit_volts
             )
             stream_infos.append(stream_info)

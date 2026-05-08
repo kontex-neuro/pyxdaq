@@ -1,8 +1,7 @@
 import pathlib
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, Optional
-from abc import ABC, abstractmethod
-from enum import Enum, auto
 
 import numpy as np
 

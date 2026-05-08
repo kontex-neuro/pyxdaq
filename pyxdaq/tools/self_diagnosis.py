@@ -1,14 +1,14 @@
+import argparse
 import json
 import platform
-import argparse
 from pathlib import Path
+
 try:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
-    from rich.columns import Columns
-    from rich.text import Text
     from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
+    from rich.text import Text
 except ImportError as e:
     print('Missing dependency: rich. Install with: pip install pyxdaq[diagnosis]')
     exit(1)
@@ -42,10 +42,12 @@ def run_diagnosis(console: Console):
     # ─── Step 1: Package installation ───
     step(console, "Package Installation")
     try:
-        import pyxdaq
+        from importlib.metadata import version
+
         import pylibxdaq
         from pylibxdaq import pyxdaq_device
-        from importlib.metadata import version
+
+        import pyxdaq
         pkg_table = Table(box=box.SIMPLE, show_header=False, padding=(0, 2))
         pkg_table.add_column("Package", style="white")
         pkg_table.add_column("Version", style="dim")
@@ -62,7 +64,9 @@ def run_diagnosis(console: Console):
 
     # ─── Step 2: Hardware Detection (OS-level) ───
     step(console, "Hardware Detection (OS-level)")
-    from pyxdaq.tools.hardware_detect import detect_xdaq_hardware, OPALKELLY_USB_VID, XDAQ_PCIE_VID, XDAQ_PCIE_DID
+    from pyxdaq.tools.hardware_detect import (
+        OPALKELLY_USB_VID, XDAQ_PCIE_DID, XDAQ_PCIE_VID, detect_xdaq_hardware
+    )
     hw = detect_xdaq_hardware()
     results['hardware'] = {
         'gen1': [{
@@ -297,15 +301,15 @@ def check_xdaq(console: Console, device, index: int):
 
 
 def _detect_headstages(console: Console, device, device_results: dict, mode: str, label: str):
-    from pyxdaq.xdaq import XDAQ
     from pyxdaq.constants import SampleRate
+    from pyxdaq.xdaq import XDAQ
 
     try:
         with device.with_mode(mode).create() as board:
             xdaq = XDAQ(board)
             xdaq.initialize()
-            xdaq.changeSampleRate(SampleRate.SampleRate30000Hz)
-            xdaq.find_connected_headstages()
+            xdaq.update_sample_rate(SampleRate.SampleRate30000Hz)
+            xdaq.scan_headstages()
 
             # Collect connected headstages per port
             port_summaries = []
