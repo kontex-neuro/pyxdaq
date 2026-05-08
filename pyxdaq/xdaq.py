@@ -1267,8 +1267,8 @@ class XDAQ(_LegacyMixin):
                     data = sps.amp[:, :, :]
                 all_data[-1].append(data)
         #         0         1       2        3       4
-        #   zscale, wave pin, signal, channel, stream
-        all_data = np.array(all_data).transpose(0, 1, 4, 3, 2)
+        #   zscale, wave pin, signal, stream, channel
+        all_data = np.array(all_data).transpose(0, 1, 3, 4, 2)
         # offset by 3 commands delay
         all_data = all_data[..., 3 + 2 * period:period * num_periods + 3 - period]
         # -> zscale, wave pin, stream, channel, signal

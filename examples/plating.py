@@ -15,6 +15,9 @@ print(xdaq.ports)
 # HDMI Port 2: Stream 4 (ch 0-16), Stream 5 (ch 16-31)
 # HDMI Port 3: Stream 6 (ch 0-16), Stream 7 (ch 16-31)
 # The get_XDAQ function will connect to the XDAQ and detect the number of headstages connected
+if xdaq.num_enabled_datastream == 0:
+    print('No headstage detected, please check the connection and try again')
+    exit()
 
 #%%
 
