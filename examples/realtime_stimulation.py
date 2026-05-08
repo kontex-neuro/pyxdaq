@@ -2,7 +2,7 @@ import signal
 import time
 import numpy as np
 
-from pyxdaq.datablock import amplifier2uv
+from pyxdaq.datablock import Samples, amplifier2uv
 from pyxdaq.xdaq import get_XDAQ
 from pyxdaq.stim import enable_stim, pulses
 
@@ -20,7 +20,16 @@ def _handle_sigint(sig, frame):
 signal.signal(signal.SIGINT, _handle_sigint)
 
 
-def on_data_received(data: bytes, error: str):
+def on_error(error: str):
+    """Prints errors from the data stream and stops the application."""
+    global is_running
+    if not is_running:
+        return
+    print(f"\n[Callback Error] {error}")
+    is_running = False
+
+
+def on_samples_received(samples: Samples):
     """
     Called in a dedicated thread whenever a data frame arrives.
 
@@ -29,33 +38,15 @@ def on_data_received(data: bytes, error: str):
     It's OK to compute here as long as it keep up with the target rate.
 
     CALLBACK LIFETIME: even after xdaq.stop(), this callback may still be
-    invoked until exit the start_receiving_aligned_buffer context.
+    invoked until exit the start_receiving_samples context.
     """
 
-    if error:
-        print(f"[XDAQ error] {error}")
-        return
-
-    if not data:
-        return
-
-    buffer = bytearray(data)
-    # Press Ctrl+C will set is_running to False,
-    # Signal notifies this callback here, it could be the last data chunk.
-    # Skip processing of the last data chunk and just return here.
-    if not is_running:
-        return
-
-    # Parse: convert buffer to samples
-    samples = xdaq.buffer_to_samples(buffer)
-
     amp_uv = amplifier2uv(samples.amp[:, target_stream, 1, 1])
-    # Shape: [n_samples, channels, datastreams]           for RHD;
-    #        [n_samples, channels, datastreams, [DC, AC]] for RHS
+    # Shape: [n_samples, datastreams, channels, [DC, AC]] for RHS
     #   n_samples: number of samples
-    #    channels: number of channels per datastream (32 for RHD, 16 for RHS)
     # datastreams: number of datastreams (depends on type and numbers of attached headstages)
-    #    [DC, AC]: DC/AC amplifier channel (RHS only); 0: DC low-gain, 1: AC high-gain
+    #    channels: number of channels per datastream (16 for RHS)
+    #    [DC, AC]: DC/AC amplifier channel; 0: DC low-gain, 1: AC high-gain
 
     # Replace the following condition to trigger stimulation
     # Here is an example of triggering stimulation when the maximum amplitude exceeds 500 μV
@@ -83,8 +74,7 @@ disable_stim = enable_stim(
 )
 
 print("Starting XDAQ acquisition...")
-# Use the aligned-buffer context to start/stop the callback queue
-with xdaq.start_receiving_buffer(on_data_received):
+with xdaq.start_receiving_samples(callbacks=[on_samples_received], on_error=on_error):
     # Kick off acquisition
     xdaq.start(continuous=True)
 
@@ -94,7 +84,7 @@ with xdaq.start_receiving_buffer(on_data_received):
 
     # Stop acquisition
     xdaq.stop(wait=True)
-    # Callback may still run until we exit this block
+    # Callback may still be invoked until we exit the context manager
 
 # Disable stimulation AFTER acquisition
 disable_stim()
