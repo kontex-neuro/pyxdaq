@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from . import impedance, resources
 from .board import Board
-from .constants import *
+from .constants import RHD, RHS, HeadstageChipID, HeadstageChipMISOID, SampleRate
 from .datablock import DataBlock, Samples, get_sample_size
 from .legacy import _LegacyMixin
 from .rhd_driver import RHDDriver

@@ -1,13 +1,10 @@
 import json
-import logging
 from dataclasses import dataclass
 from typing import Callable, List
 
 from pylibxdaq import device, pyxdaq_device
 
 from .constants import EndPoints
-
-logger = logging.getLogger(__name__)
 
 
 class BoardInfo(device.DeviceInfo):

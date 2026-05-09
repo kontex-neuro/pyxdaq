@@ -7,7 +7,6 @@ readme = "README.md"
 
 requires-python = ">=3.12"
 dependencies = [
-    "colorlog",
     "dataclass_wizard>=0.36.0",
     "pylibxdaq>=0.7.0,<0.8.0",
     "numpy",
