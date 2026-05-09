@@ -1,9 +1,12 @@
-from typing import Union
+from typing import TYPE_CHECKING, Union
 
 import numpy as np
 
 from .constants import SampleRate, StimStepSize
 from .intan_headstage import IntanHeadstage
+
+if TYPE_CHECKING:
+    from .xdaq import XDAQ
 
 
 def _pack_instructions(func):
@@ -153,3 +156,31 @@ class RHSDriver(IntanHeadstage):
         self.controller.set('stepSel3', s3)
         self.controller.set('stimPbias', p)
         self.controller.set('stimNbias', n)
+
+    def upload_commands(
+        self,
+        xdaq: 'XDAQ',
+        update_stim: bool = False,
+        readonly: bool = True,
+        upper_bandwidth: float = 7500,
+        lower_bandwidth: float = 1
+    ):
+
+        # Not implemented yet
+        # reg.setDspCutoffFreq(0)
+        self.set_upper_bandwidth(upper_bandwidth)
+
+        self.set_lower_bandwidth_a(1000)
+        self.set_lower_bandwidth_b(lower_bandwidth)
+
+        cmd = self.createCommandListRegisterConfig(update_stim=update_stim, readonly=readonly)
+        xdaq.upload_auxcmd(cmd, 0, 0)
+        xdaq.set_auxcmd_length(0, 0, len(cmd) - 1)
+        cmd = self.dummy(8192)
+        for aux in [1, 2, 3]:
+            xdaq.upload_auxcmd(cmd, aux, 0)
+        cmd = self.createCommandListRegisterConfig(update_stim=True, readonly=False)
+        xdaq.upload_auxcmd(cmd, 0, 0)
+        xdaq.set_auxcmd_length(0, 0, len(cmd) - 1)
+
+        xdaq.acquire_raw_data(samples=128)

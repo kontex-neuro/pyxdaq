@@ -1,5 +1,10 @@
+from typing import TYPE_CHECKING
+
 from .constants import SampleRate
 from .intan_headstage import IntanHeadstage
+
+if TYPE_CHECKING:
+    from .xdaq import XDAQ
 
 
 class RHDDriver(IntanHeadstage):
@@ -125,3 +130,41 @@ class RHDDriver(IntanHeadstage):
 
     def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
         return self.get_zcheck_cmds(frequency, amplitude, 6, maxlength)
+
+    def upload_commands(
+        self,
+        xdaq: 'XDAQ',
+        fastSettle: bool = False,
+        upper_bandwidth: float = 7500,
+        lower_bandwidth: float = 1
+    ):
+        cmd = self.createCommandListUpdateDigOut()
+        xdaq.upload_auxcmd(cmd, 0, 0)
+        xdaq.set_auxcmd_length(0, 0, len(cmd) - 1)
+        xdaq.set_auxcmd_bank('all', 0, 0)
+
+        cmd = self.createCommandListTempSensor()
+        xdaq.upload_auxcmd(cmd, 1, 0)
+        xdaq.set_auxcmd_length(1, 0, len(cmd) - 1)
+        xdaq.set_auxcmd_bank('all', 1, 0)
+
+        # Not implemented yet
+        # reg.setDspCutoffFreq(0)
+        self.set_upper_bandwidth(upper_bandwidth)
+        self.set_lower_bandwidth(lower_bandwidth)
+
+        cmd = self.createCommandListRegisterConfig(True)
+        xdaq.upload_auxcmd(cmd, 2, 0)
+        xdaq.set_auxcmd_length(2, 0, len(cmd) - 1)
+
+        cmd = self.createCommandListRegisterConfig(False)
+        xdaq.upload_auxcmd(cmd, 2, 1)
+        xdaq.set_auxcmd_length(2, 0, len(cmd) - 1)
+
+        self.controller.set('ampFastSettle', 1)
+        cmd = self.createCommandListRegisterConfig(False)
+        xdaq.upload_auxcmd(cmd, 2, 2)
+        xdaq.set_auxcmd_length(2, 0, len(cmd) - 1)
+        self.controller.set('ampFastSettle', 0)
+
+        xdaq.set_auxcmd_bank('all', 2, 2 if fastSettle else 1)

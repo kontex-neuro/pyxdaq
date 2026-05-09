@@ -660,55 +660,16 @@ class XDAQ(_LegacyMixin):
         lower_bandwidth: float = 1
     ):
         reg = self.getreg(self.sampleRate)
-
-        if not self.rhs:
-            cmd = reg.createCommandListUpdateDigOut()
-            self.upload_auxcmd(cmd, 0, 0)
-            self.set_auxcmd_length(0, 0, len(cmd) - 1)
-            self.set_auxcmd_bank('all', 0, 0)
-
-            cmd = reg.createCommandListTempSensor()
-            self.upload_auxcmd(cmd, 1, 0)
-            self.set_auxcmd_length(1, 0, len(cmd) - 1)
-            self.set_auxcmd_bank('all', 1, 0)
-
-        # Not implemented yet
-        # reg.setDspCutoffFreq(0)
-        reg.set_upper_bandwidth(upper_bandwidth)
-        if self.rhs:
-            reg.set_lower_bandwidth_a(1000)
-            reg.set_lower_bandwidth_b(lower_bandwidth)
-        else:
-            reg.set_lower_bandwidth(lower_bandwidth)
-
-        if self.rhs:
-            cmd = reg.createCommandListRegisterConfig(**stim_params)
-            self.upload_auxcmd(cmd, 0, 0)
-            self.set_auxcmd_length(0, 0, len(cmd) - 1)
-            cmd = reg.dummy(8192)
-            for aux in [1, 2, 3]:
-                self.upload_auxcmd(cmd, aux, 0)
-            cmd = reg.createCommandListRegisterConfig(update_stim=True, readonly=False)
-            self.upload_auxcmd(cmd, 0, 0)
-            self.set_auxcmd_length(0, 0, len(cmd) - 1)
-
-            self.acquire_raw_data(samples=128)
-        else:
-            cmd = reg.createCommandListRegisterConfig(True)
-            self.upload_auxcmd(cmd, 2, 0)
-            self.set_auxcmd_length(2, 0, len(cmd) - 1)
-
-            cmd = reg.createCommandListRegisterConfig(False)
-            self.upload_auxcmd(cmd, 2, 1)
-            self.set_auxcmd_length(2, 0, len(cmd) - 1)
-
-            reg.controller.set('ampFastSettle', 1)
-            cmd = reg.createCommandListRegisterConfig(False)
-            self.upload_auxcmd(cmd, 2, 2)
-            self.set_auxcmd_length(2, 0, len(cmd) - 1)
-            reg.controller.set('ampFastSettle', 0)
-
-            self.set_auxcmd_bank('all', 2, 2 if fastSettle else 1)
+        if isinstance(reg, RHDDriver):
+            reg.upload_commands(self, fastSettle, upper_bandwidth, lower_bandwidth)
+        elif isinstance(reg, RHSDriver):
+            reg.upload_commands(
+                self,
+                update_stim=stim_params['update_stim'],
+                readonly=stim_params['readonly'],
+                upper_bandwidth=upper_bandwidth,
+                lower_bandwidth=lower_bandwidth,
+            )
 
     def update_sample_rate(
         self,
