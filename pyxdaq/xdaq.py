@@ -206,14 +206,6 @@ class XDAQ(_LegacyMixin):
         res = resources.rhs if self.rhs else resources.rhd
         return R(sample_rate, res.reg_path, res.isa_path)
 
-    def reset_board(self):
-        """
-        This clears all auxiliary command RAM banks, clears the USB FIFO, and resets the
-        per-channel sampling rate to 30.0 kS/s/ch.
-        """
-        self.dev.set_register(self.ep.WireInResetRun, 1, 1)
-        self.dev.set_register(self.ep.WireInResetRun, 0, 1)
-
     def run(self):
         self.dev.send_trigger(self.ep.TrigInSpiStart, 0)
 
@@ -800,15 +792,25 @@ class XDAQ(_LegacyMixin):
     def start_receiving_buffer(
         self,
         callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
+        chunk_size: Optional[int] = None,
     ):
+        """
+        Args:
+            chunk_size: Bytes to accumulate before invoking `callback`. Defaults
+                to 1/100th of a second's worth, which favours throughput: a chunk
+                is not delivered until it is full, so it also sets a floor of
+                ~10 ms on how stale the oldest sample in it can be. Closed-loop
+                work should pass a smaller value --
+                `chunk_size = sample_size_in_bytes() * sample_rate_hz * target_latency_s`.
+        """
         sample_size = self.sample_size_in_bytes()
-        sample_rate = self.sample_rate_hz
 
-        hardware_events_per_sec = 100
-        chunk_size = int(sample_size * sample_rate / hardware_events_per_sec)
+        if chunk_size is None:
+            hardware_events_per_sec = 100
+            chunk_size = int(sample_size * self.sample_rate_hz / hardware_events_per_sec)
 
         return self.dev.start_receiving_aligned_buffer(
-            self.ep.PipeOutData, sample_size, callback, chunk_size=chunk_size
+            self.ep.PipeOutData, sample_size, callback, chunk_size=max(chunk_size, sample_size)
         )
 
     def start_receiving_samples(
@@ -818,6 +820,7 @@ class XDAQ(_LegacyMixin):
             Callable[[Samples | None, str | None], None],
         ]],
         on_error: Optional[Callable[[str], None]],
+        chunk_size: Optional[int] = None,
     ):
         """
         Starts receiving data and provides parsed Samples objects to callbacks.
@@ -835,6 +838,8 @@ class XDAQ(_LegacyMixin):
                 - my_callback(samples: Samples | None, error: str | None): Called
                   for both data and errors.
             on_error: An optional callback that is invoked only when an error occurs.
+            chunk_size: Bytes per callback; see `start_receiving_buffer`. Lower it
+                for closed-loop use, where the default costs ~10 ms of latency.
         """
         if not callbacks:
             raise ValueError("At least one callback must be provided")
@@ -885,7 +890,7 @@ class XDAQ(_LegacyMixin):
             except Exception as e:
                 on_error(f"Unhandled exception in callback: {e}")
 
-        return self.start_receiving_buffer(_internal_callback)
+        return self.start_receiving_buffer(_internal_callback, chunk_size=chunk_size)
 
     def test_cable_delay(self, output: str = ''):
         headstagename = np.array([ord(i) for i in ('INTAN' if self.rhs else 'INTANRHD')])
