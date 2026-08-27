@@ -796,12 +796,13 @@ class XDAQ(_LegacyMixin):
     ):
         """
         Args:
-            chunk_size: Bytes to accumulate before invoking `callback`. Defaults
-                to 1/100th of a second's worth, which favours throughput: a chunk
-                is not delivered until it is full, so it also sets a floor of
-                ~10 ms on how stale the oldest sample in it can be. Closed-loop
-                work should pass a smaller value --
-                `chunk_size = sample_size_in_bytes() * sample_rate_hz * target_latency_s`.
+            chunk_size: Upper bound on the bytes gathered before `callback` runs,
+                defaulting to 1/100th of a second's worth. Closed-loop work wants
+                a smaller value; batching latency is roughly half a chunk.
+
+                It is a ceiling, not a setting: the driver delivers what is ready,
+                and has a floor of its own below which smaller requests make no
+                difference.
         """
         sample_size = self.sample_size_in_bytes()
 

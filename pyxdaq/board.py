@@ -56,12 +56,16 @@ class Board(device.Device):
         callback: Callable[[pyxdaq_device.DataView | None, str | None], None],
         chunk_size: int = 0,
     ):
+        """
+        Deliver whole samples to `callback`, one event per driver chunk.
+        """
         if self.receiving_stream:
             raise RuntimeError("Already receiving a stream")
 
         class SingleStream:
+            """Marks the board busy for the lifetime of one stream."""
 
-            def __init__(self, board: 'Board', stream: pyxdaq_device.DataStream | None):
+            def __init__(self, board: 'Board', stream: 'pyxdaq_device.DataStream | None'):
                 self.board = board
                 self.stream = stream
 
@@ -73,10 +77,13 @@ class Board(device.Device):
                 self.stream.__exit__(exc_type, exc_value, traceback)
                 self.board.receiving_stream = False
 
+        # `merged=True` is not optional: a chunk straddling a sample boundary
+        # would otherwise arrive as two events, and the extra one carries a single
+        # sample at the full cost of a parse.
         return SingleStream(
             self,
             self.raw.start_aligned_read_stream(
-                epAddr.value, alignment, callback, chunk_size=chunk_size
+                epAddr.value, alignment, callback, chunk_size=chunk_size, merged=True
             ),
         )
 

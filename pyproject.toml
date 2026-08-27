@@ -1,6 +1,6 @@
 [project]
 name = "pyxdaq"
-version = "0.6.0"
+version = "0.7.0"
 license = "MIT"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -8,7 +8,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dataclass_wizard>=0.36.0",
-    "pylibxdaq>=0.7.0,<0.8.0",
+    "pylibxdaq==0.8.*",
     "numpy",
     "rich",
     "tqdm",
