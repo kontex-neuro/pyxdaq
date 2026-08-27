@@ -363,6 +363,9 @@ class XDAQ(_LegacyMixin):
         return sum(i.enabled for i in self.ports.streams)
 
     def set_ttl_override(self, enable: Union[int, bool]):
+        if self.dev.device_info.api_version == "0":
+            # TODO: Guard Gen1 XDAQ which does not currently support TTL override
+            raise NotImplementedError("TTL override not supported on this device")
         v = enable * 0xffffffff if isinstance(enable, bool) else enable & 0xffffffff
         self.dev.set_register(self.ep.TTL_override, v)
 

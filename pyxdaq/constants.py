@@ -17,7 +17,7 @@ class XDAQWireOut(EndPoints):
 
 
 class RHD(EndPoints):
-    TTL_override = 0x1400
+    TTL_override = 0x1414
     WireInResetRun = 0x00
     WireInMaxTimeStep = 0x01
     WireInSerialDigitalInCntl = 0x02
@@ -86,7 +86,7 @@ class RHD(EndPoints):
 
 
 class RHS(EndPoints):
-    TTL_override = 0x1400
+    TTL_override = 0x1414
     WireInResetRun = 0x00
     WireInMaxTimeStep = 0x01
     WireInMaxTimeStepLsb = 0x01
