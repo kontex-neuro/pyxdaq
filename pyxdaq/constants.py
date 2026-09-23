@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum
 
 
@@ -207,6 +208,18 @@ class SampleRate(Enum):
         return self.value[2]
 
 
+@dataclass(frozen=True)
+class ChipCapabilities:
+    channels_per_stream: int
+    streams_per_chip: int
+    channels_per_stream_on_wire: int
+    differential_inputs: bool = False
+
+    @property
+    def num_channels(self) -> int:
+        return self.channels_per_stream * self.streams_per_chip
+
+
 class HeadstageChipID(Enum):
     NA = 0
     RHD2132 = 1
@@ -214,23 +227,19 @@ class HeadstageChipID(Enum):
     RHD2164 = 4
     RHS2116 = 32
 
-    def num_channels(self):
-        if self == HeadstageChipID.RHD2164:
-            return 64
-        elif self == HeadstageChipID.RHD2132:
-            return 32
-        elif self == HeadstageChipID.RHD2216:
-            return 16
-        elif self == HeadstageChipID.RHS2116:
-            return 16
-        else:
-            return 0
+    @property
+    def capabilities(self) -> ChipCapabilities | None:
+        """Detected chip capabilities; None means no chip was identified."""
+        return _CHIP_CAPABILITIES.get(self)
+
+    def num_channels(self) -> int:
+        capabilities = self.capabilities
+        return capabilities.num_channels if capabilities is not None else 0
 
     def num_channels_per_stream(self):
         """Number of real amplifier channels this chip puts on one datastream."""
-        if self == HeadstageChipID.RHD2164:
-            return self.num_channels() // 2
-        return self.num_channels()
+        capabilities = self.capabilities
+        return capabilities.channels_per_stream if capabilities is not None else 0
 
     def channels_per_stream_on_wire(self):
         """
@@ -241,9 +250,31 @@ class HeadstageChipID(Enum):
         sends 16 channels of real data followed by 16 channels of dummy data, which is
         why this differs from num_channels_per_stream() for that chip.
         """
-        if self == HeadstageChipID.NA:
-            return 0
-        return 16 if self == HeadstageChipID.RHS2116 else 32
+        capabilities = self.capabilities
+        return capabilities.channels_per_stream_on_wire if capabilities is not None else 0
+
+
+_CHIP_CAPABILITIES = {
+    HeadstageChipID.RHD2132:
+        ChipCapabilities(
+            channels_per_stream=32, streams_per_chip=1, channels_per_stream_on_wire=32
+        ),
+    HeadstageChipID.RHD2216:
+        ChipCapabilities(
+            channels_per_stream=16,
+            streams_per_chip=1,
+            channels_per_stream_on_wire=32,
+            differential_inputs=True
+        ),
+    HeadstageChipID.RHD2164:
+        ChipCapabilities(
+            channels_per_stream=32, streams_per_chip=2, channels_per_stream_on_wire=32
+        ),
+    HeadstageChipID.RHS2116:
+        ChipCapabilities(
+            channels_per_stream=16, streams_per_chip=1, channels_per_stream_on_wire=16
+        ),
+}
 
 
 class ZcheckPolarity(Enum):

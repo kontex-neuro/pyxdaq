@@ -3,7 +3,6 @@ import math
 import time
 from dataclasses import dataclass
 from enum import Enum
-from functools import partial
 from typing import Callable, List, Optional, Tuple, Union
 
 import numpy as np
@@ -79,25 +78,18 @@ class HdmiPort(JSONWizard):
         def toconfig(info, sid):
             cdelay = int(info[0])
             cid = info[1]
-            if cid == HeadstageChipID.RHD2132:
-                return [
-                    StreamConfig(available=True, chip=cid, delay=cdelay, sid=sid[0]),
-                    StreamConfig(sid=sid[1])
-                ]
-            if cid == HeadstageChipID.RHD2164:
-                sc = partial(StreamConfig, available=True, chip=cid, delay=cdelay)
-                return [
-                    sc(miso=HeadstageChipMISOID.MISO_A, sid=sid[0]),
-                    sc(miso=HeadstageChipMISOID.MISO_B, sid=sid[1])
-                ]
-            if cid == HeadstageChipID.RHD2216:
-                return [
-                    StreamConfig(available=True, chip=cid, delay=cdelay, sid=sid[0]),
-                    StreamConfig(sid=sid[1])
-                ]
-            if cid == HeadstageChipID.RHS2116:
-                return [StreamConfig(available=True, chip=cid, delay=cdelay, sid=sid[0])]
-            return [StreamConfig(sid=s) for s in sid]
+            streams = [StreamConfig(sid=stream_id) for stream_id in sid]
+            capabilities = cid.capabilities
+            if capabilities is None:
+                return streams
+            for index in range(capabilities.streams_per_chip):
+                miso = HeadstageChipMISOID.NA
+                if capabilities.streams_per_chip == 2:
+                    miso = (HeadstageChipMISOID.MISO_A, HeadstageChipMISOID.MISO_B)[index]
+                streams[index] = StreamConfig(
+                    available=True, chip=cid, miso=miso, delay=cdelay, sid=sid[index]
+                )
+            return streams
 
         return cls([i for info, sid in zip(infos, sids) for i in toconfig(info, sid)], port)
 

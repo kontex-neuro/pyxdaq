@@ -2,12 +2,14 @@
 Channel layout of an RHD2216, which fills only 16 of the 32 amplifier words its
 datastream occupies. None of this needs a device attached.
 """
+from dataclasses import FrozenInstanceError
+
 import numpy as np
 import pytest
 
 from pyxdaq.constants import HeadstageChipID, HeadstageChipMISOID, ZcheckPolarity
 from pyxdaq.stream import RHDStreamer, RHSStreamer
-from pyxdaq.xdaq import StreamConfig, XDAQ
+from pyxdaq.xdaq import HdmiPort, StreamConfig, XDAQ
 
 
 class FakeSamples:
@@ -55,6 +57,62 @@ def test_undetected_stream_has_no_channels():
     assert s.channel_range == "NA"
 
 
+@pytest.mark.parametrize(
+    'chip, total, active, streams, wire, differential', [
+        (HeadstageChipID.RHD2132, 32, 32, 1, 32, False),
+        (HeadstageChipID.RHD2216, 16, 16, 1, 32, True),
+        (HeadstageChipID.RHD2164, 64, 32, 2, 32, False),
+        (HeadstageChipID.RHS2116, 16, 16, 1, 16, False),
+    ]
+)
+def test_chip_capabilities(chip, total, active, streams, wire, differential):
+    capabilities = chip.capabilities
+    assert capabilities is not None
+    assert capabilities.num_channels == chip.num_channels() == total
+    assert capabilities.channels_per_stream == chip.num_channels_per_stream() == active
+    assert capabilities.streams_per_chip == streams
+    assert capabilities.channels_per_stream_on_wire == chip.channels_per_stream_on_wire() == wire
+    assert capabilities.differential_inputs is differential
+    with pytest.raises(FrozenInstanceError):
+        capabilities.channels_per_stream = 0
+
+
+def test_unknown_chip_has_no_capabilities():
+    assert HeadstageChipID.NA.capabilities is None
+    assert HeadstageChipID.NA.num_channels() == 0
+    assert HeadstageChipID.NA.num_channels_per_stream() == 0
+    assert HeadstageChipID.NA.channels_per_stream_on_wire() == 0
+
+
+@pytest.mark.parametrize(
+    'chip, stream_ids, active_count, misos', [
+        (HeadstageChipID.RHD2132, [8, 9], 1, [HeadstageChipMISOID.NA]),
+        (HeadstageChipID.RHD2216, [8, 9], 1, [HeadstageChipMISOID.NA]),
+        (
+            HeadstageChipID.RHD2164, [8, 9
+                                     ], 2, [HeadstageChipMISOID.MISO_A, HeadstageChipMISOID.MISO_B]
+        ),
+        (HeadstageChipID.RHS2116, [4], 1, [HeadstageChipMISOID.NA]),
+        (HeadstageChipID.NA, [8, 9], 0, []),
+        (HeadstageChipID.NA, [4], 0, []),
+    ]
+)
+def test_discovery_preserves_stream_slots(chip, stream_ids, active_count, misos):
+    port = HdmiPort.fromChipInfos([(3, chip)], [stream_ids], 2)
+    assert port.portNumber == 2
+    assert [config.sid for config in port.streams] == stream_ids
+    for index, config in enumerate(port.streams):
+        assert not config.enabled
+        if index < active_count:
+            assert config.available
+            assert config.chip == chip
+            assert config.delay == 3
+            assert config.miso == misos[index]
+        else:
+            assert config == StreamConfig(sid=stream_ids[index])
+    assert HdmiPort.from_json(port.to_json()) == port
+
+
 def test_rhd2216_occupies_a_full_wire_slot():
     assert HeadstageChipID.RHD2216.num_channels_per_stream() == 16
     assert HeadstageChipID.RHD2216.channels_per_stream_on_wire() == 32
@@ -90,9 +148,7 @@ def test_stream_enabled_without_a_chip_keeps_full_width(rhs, width):
 
 
 def test_rhd2216_with_undetected_stream_sweeps_full_width():
-    x = fake_xdaq(
-        [stream(HeadstageChipID.RHD2216), StreamConfig(sid=1, enabled=True)]
-    )
+    x = fake_xdaq([stream(HeadstageChipID.RHD2216), StreamConfig(sid=1, enabled=True)])
     assert x.enabled_stream_channels() == [16, 32]
     assert x.max_amp_channels_per_stream() == 32
 
