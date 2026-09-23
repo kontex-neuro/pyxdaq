@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from .constants import SampleRate
+from .constants import SampleRate, ZcheckPolarity
 from .intan_headstage import IntanHeadstage
 
 if TYPE_CHECKING:
@@ -130,6 +130,15 @@ class RHDDriver(IntanHeadstage):
 
     def createCommandListZcheckDac(self, frequency: float, amplitude: float, maxlength: int):
         return self.get_zcheck_cmds(frequency, amplitude, 6, maxlength)
+
+    def set_zcheck_polarity(self, polarity: ZcheckPolarity):
+        """
+        Select whether impedance testing drives the positive or negative amplifier input.
+
+        Only the RHD2216 has differential inputs; on the RHD2132/RHD2164 the negative
+        inputs are tied to the shared reference and this has no effect.
+        """
+        self.controller.set('zcheckSelPol', polarity.value)
 
     def upload_commands(
         self,

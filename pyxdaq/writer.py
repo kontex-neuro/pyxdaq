@@ -3,7 +3,7 @@ from typing import Dict
 
 from .datablock import Samples
 from .openephys import OpenEphysMetadata, RecordingPaths
-from .stream import RHDStreamer, RHSStreamer, StreamWriter
+from .stream import DeviceStreamer, RHDStreamer, RHSStreamer, StreamWriter
 from .xdaq import XDAQ
 
 logger = logging.getLogger(__name__)
@@ -22,14 +22,20 @@ class OpenEphysWriter:
         self.paths = RecordingPaths.create(root_path, record_node)
         self.metadata = OpenEphysMetadata(gui_version=gui_version)
 
-        if self.xdaq.rhs:
-            self.streamer = RHSStreamer()
-        else:
-            self.streamer = RHDStreamer()
+        self.streamer = self._make_streamer()
 
         self._is_recording = False
         self.stream_writers: Dict[str, StreamWriter] = {}
         self.sample_rate = 0
+
+    def _make_streamer(self) -> DeviceStreamer:
+        """
+        Build a streamer that knows the real channel count of each enabled datastream,
+        so that the dummy channels of an RHD2216 are not written to disk.
+        """
+        channels_per_stream = self.xdaq.enabled_stream_channels()
+        cls = RHSStreamer if self.xdaq.rhs else RHDStreamer
+        return cls(channels_per_stream)
 
     def __enter__(self):
         self.start_recording()
@@ -48,6 +54,8 @@ class OpenEphysWriter:
         recording_path = self.paths.new_recording(self.metadata.recording_index)
 
         self.sample_rate = self.xdaq.sampleRate.rate
+        # Streams may have been enabled or rescanned since construction.
+        self.streamer = self._make_streamer()
 
         stream_configs = self.streamer.create_stream_configs()
         stream_infos = []
@@ -71,7 +79,7 @@ class OpenEphysWriter:
             stream_info = self.metadata.get_stream_info(
                 stream_name=config.stream_name,
                 sample_rate=self.sample_rate,
-                num_channels=self.xdaq.num_enabled_datastream * self.streamer.num_channels(),
+                num_channels=self.streamer.num_channels(self.xdaq.num_enabled_datastream),
                 bit_volts=config.bit_volts
             )
             stream_infos.append(stream_info)

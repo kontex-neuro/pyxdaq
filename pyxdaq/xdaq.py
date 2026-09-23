@@ -13,7 +13,7 @@ from tqdm.auto import tqdm
 
 from . import impedance, resources
 from .board import Board
-from .constants import RHD, RHS, HeadstageChipID, HeadstageChipMISOID, SampleRate
+from .constants import RHD, RHS, HeadstageChipID, HeadstageChipMISOID, SampleRate, ZcheckPolarity
 from .datablock import DataBlock, Samples, get_sample_size
 from .legacy import _LegacyMixin
 from .rhd_driver import RHDDriver
@@ -36,17 +36,30 @@ class StreamConfig(JSONWizard):
     sid: int = None
     enabled: bool = False
 
+    @property
+    def num_channels(self) -> int:
+        """
+        Real amplifier channels carried by this datastream, 0 if no chip was detected.
+
+        An RHD2216 reports 16 here while still occupying 32 amplifier words in the
+        datablock; see HeadstageChipID.channels_per_stream_on_wire.
+        """
+        return self.chip.num_channels_per_stream() if self.available else 0
+
+    @property
+    def channel_range(self) -> str:
+        n = self.num_channels
+        if n == 0:
+            return "NA"
+        first = 32 if self.miso == HeadstageChipMISOID.MISO_B else 0
+        return f"[{first:2d},{first + n - 1:2d}]"
+
     def __str__(self):
         stat = ('🟢' if self.enabled else '🛑') if self.available else '🚫'
         if not self.available:
             return f'{stat} Data stream[{self.sid:02d}] - NA'
-        channel_ranges = {
-            HeadstageChipMISOID.MISO_A: "[ 0,31]",
-            HeadstageChipMISOID.MISO_B: "[32,63]",
-        }
-        channel_range = channel_ranges.get(self.miso, "NA")
         return (f"{stat} Data stream[{self.sid:02d}] - "
-                f"{self.chip.name}:{channel_range}")
+                f"{self.chip.name}:{self.channel_range}")
 
 
 @dataclass
@@ -361,6 +374,43 @@ class XDAQ(_LegacyMixin):
     def num_enabled_datastream(self):
         # TODO: use cached value
         return sum(i.enabled for i in self.ports.streams)
+
+    @property
+    def channels_per_stream_on_wire(self) -> int:
+        """Amplifier words every datastream occupies in the datablock."""
+        return 16 if self.rhs else 32
+
+    @property
+    def enabled_streams(self) -> List[StreamConfig]:
+        """
+        Enabled datastreams, ordered to match the stream axis of Samples.amp.
+
+        The controller emits enabled streams in ascending stream id, so index i of this
+        list describes samples.amp[:, i, ...].
+        """
+        return [s for s in self.ports.streams if s.enabled]
+
+    def enabled_stream_channels(self) -> List[int]:
+        """
+        Real amplifier channel count of each enabled datastream, in datablock order.
+
+        Entries are the number of leading channels of samples.amp[:, i, :] that hold
+        real data; the rest are dummy words (an RHD2216 yields 16, not 32). A stream
+        that is enabled without a detected chip is reported at the full wire width so
+        that manually configured streams are never silently dropped.
+        """
+        wire = self.channels_per_stream_on_wire
+        return [min(s.num_channels, wire) or wire for s in self.enabled_streams]
+
+    def max_amp_channels_per_stream(self) -> int:
+        """
+        Largest real channel count among enabled datastreams.
+
+        Used as the default channel sweep for impedance measurement: boards holding
+        only RHD2216 chips need 16 tests, a board mixing an RHD2216 with an RHD2132
+        still needs 32. Enabled streams without a detected chip use the full wire width.
+        """
+        return max(self.enabled_stream_channels(), default=self.channels_per_stream_on_wire)
 
     def set_ttl_override(self, enable: Union[int, bool]):
         if self.dev.device_info.api_version == "0":
@@ -986,6 +1036,7 @@ class XDAQ(_LegacyMixin):
         strategy: impedance.Strategy = impedance.Strategy.auto(),
         channels: Optional[List[int]] = None,
         progress: bool = True,
+        polarity: ZcheckPolarity = ZcheckPolarity.Positive,
     ) -> Union[Tuple[np.ndarray, np.ndarray], np.ndarray]:
         if self.stim:
             self.stim.disable()
@@ -994,8 +1045,9 @@ class XDAQ(_LegacyMixin):
         for i in range(8):
             self.enable_dac(i, False)
 
-        headstage_channels = 16 if self.rhs else 32
-        test_channels = channels if channels is not None else list(range(headstage_channels))
+        if channels is None:
+            channels = range(self.max_amp_channels_per_stream())
+        test_channels = list(channels)
         sample_rate = self.sampleRate.rate
         period = frequency.get_period(sample_rate)
         frequency = frequency.get_actual(sample_rate)
@@ -1015,6 +1067,9 @@ class XDAQ(_LegacyMixin):
         reg.set_upper_bandwidth(7500)
         reg.controller.set('dspEnable', 1)
         reg.controller.set('zcheckEn', 1)
+        if not self.rhs:
+            # RHD2216 only: pick which side of the differential input pair is driven.
+            reg.controller.set('zcheckSelPol', polarity.value)
         if self.rhs:
             cmd = reg.createCommandListRegisterConfig(False, False)
         else:
@@ -1056,6 +1111,8 @@ class XDAQ(_LegacyMixin):
         channels: Optional[List[int]] = None,
         progress: bool = True,
         raw_data_return: bool = False,
+        polarity: ZcheckPolarity = ZcheckPolarity.Positive,
+        mask_invalid: bool = True,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Measure impedance of the headstage
@@ -1068,12 +1125,20 @@ class XDAQ(_LegacyMixin):
         strategy: impedance.Strategy
             Specify the measurement duration, see Strategy for details.
         channels: List[int]
-            The channels to test, if None, test all channels.
+            The channels to test, if None, test every channel present on the largest
+            detected chip (16 for a board holding only RHD2216 headstages, 32 otherwise).
             Note that all datastreams will be tested in parallel.
         progress: bool
             Whether to show progress bar
         raw_data_return: bool
             Whether to skip the impedance calculation and return the raw measurement data instead.
+        polarity: ZcheckPolarity
+            RHD only. Which input of the amplifier to drive with the test signal. Only the
+            RHD2216 has differential inputs, so Negative is meaningless on other chips.
+        mask_invalid: bool
+            Replace results for channels the chip on that datastream does not have with NaN.
+            Relevant when an RHD2216 (16 channels) shares the board with a 32 channel chip,
+            or when explicit channels above the chip's channel count are requested.
 
         Returns:
         --------
@@ -1087,9 +1152,10 @@ class XDAQ(_LegacyMixin):
         When raw_data_return is True:
         raw_data: np.ndarray
         """
-        headstage_channels = 16 if self.rhs else 32
-        test_channels = channels if channels is not None else list(range(headstage_channels))
-        all_data = self.send_ztest_signals(frequency, strategy, test_channels, progress)
+        if channels is None:
+            channels = range(self.max_amp_channels_per_stream())
+        test_channels = list(channels)
+        all_data = self.send_ztest_signals(frequency, strategy, test_channels, progress, polarity)
         n_zscale, n_test_ch, n_stream, _, _ = all_data.shape
         assert n_zscale == 3
         # extract only signals from the target channel which the testing signal is applied
@@ -1111,7 +1177,17 @@ class XDAQ(_LegacyMixin):
             frequency=frequency.get_actual(self.sample_rate_hz),
         )
 
-        return magnitude.reshape((n_stream, n_test_ch)), phase.reshape((n_stream, n_test_ch))
+        magnitude = magnitude.reshape((n_stream, n_test_ch))
+        phase = phase.reshape((n_stream, n_test_ch))
+
+        if mask_invalid:
+            stream_channels = self.enabled_stream_channels()
+            if len(stream_channels) == n_stream:
+                present = np.less.outer(np.array(test_channels), np.array(stream_channels)).T
+                magnitude = np.where(present, magnitude, np.nan)
+                phase = np.where(present, phase, np.nan)
+
+        return magnitude, phase
 
 
 def get_XDAQ(*, rhs: bool = False, index=0, fastSettle: bool = False, skip_headstage: bool = False):

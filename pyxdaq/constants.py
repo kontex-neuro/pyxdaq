@@ -227,9 +227,35 @@ class HeadstageChipID(Enum):
             return 0
 
     def num_channels_per_stream(self):
+        """Number of real amplifier channels this chip puts on one datastream."""
         if self == HeadstageChipID.RHD2164:
             return self.num_channels() // 2
         return self.num_channels()
+
+    def channels_per_stream_on_wire(self):
+        """
+        Number of amplifier words a datastream occupies in the datablock.
+
+        This is fixed by the controller, not by the chip: every RHD datastream carries
+        32 amplifier words and every RHS datastream carries 16. An RHD2216 therefore
+        sends 16 channels of real data followed by 16 channels of dummy data, which is
+        why this differs from num_channels_per_stream() for that chip.
+        """
+        if self == HeadstageChipID.NA:
+            return 0
+        return 16 if self == HeadstageChipID.RHS2116 else 32
+
+
+class ZcheckPolarity(Enum):
+    """
+    Which side of an amplifier input the impedance test current is applied to.
+
+    Only meaningful on the RHD2216, whose 16 amplifiers are differential and expose
+    both inputs. On single-ended chips (RHD2132/RHD2164) the negative inputs are tied
+    to the shared reference, so only Positive is useful.
+    """
+    Positive = 0
+    Negative = 1
 
 
 class HeadstageChipMISOID(Enum):

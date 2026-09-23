@@ -1,7 +1,7 @@
 import pathlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
@@ -29,6 +29,29 @@ class StreamConfig:
 
 
 class DeviceStreamer(ABC):
+    """
+    Flattens the per-datastream amplifier data of a Samples block into channel columns.
+
+    channels_per_stream, when given, lists how many leading channels of each datastream
+    hold real data, in datablock order (see XDAQ.enabled_stream_channels). It exists for
+    the RHD2216, which occupies 32 amplifier words per datastream but only fills the
+    first 16; the trailing 16 are dummy data and are dropped here rather than written to
+    disk. Leaving it None keeps every wire channel.
+    """
+
+    CHANNELS_PER_STREAM_ON_WIRE: int
+
+    def __init__(self, channels_per_stream: Optional[Sequence[int]] = None):
+        self.channels_per_stream = (
+            None if channels_per_stream is None else [int(c) for c in channels_per_stream]
+        )
+        if self.channels_per_stream is not None:
+            for count in self.channels_per_stream:
+                if not 0 <= count <= self.CHANNELS_PER_STREAM_ON_WIRE:
+                    raise ValueError(
+                        f"channels_per_stream entries must be between 0 and "
+                        f"{self.CHANNELS_PER_STREAM_ON_WIRE}, got {count}"
+                    )
 
     @abstractmethod
     def create_stream_configs(self) -> Dict[str, StreamConfig]:
@@ -36,10 +59,40 @@ class DeviceStreamer(ABC):
 
     @abstractmethod
     def get_amp_data_for_stream(self, stream_name: str, samples: "Samples") -> np.ndarray:
-        """Extracts amplifier data for a specific stream from a Samples object."""
+        """
+        Extracts amplifier data for a specific stream from a Samples object,
+        shaped [n_samples, num_channels()] in the order it is written to disk.
+        """
+
+    def num_channels(self, num_streams: Optional[int] = None) -> int:
+        """Total amplifier channels written per sample across all enabled datastreams."""
+        if self.channels_per_stream is not None:
+            return sum(self.channels_per_stream)
+        if num_streams is None:
+            raise ValueError(
+                "num_streams is required when the streamer was built without channels_per_stream"
+            )
+        return num_streams * self.CHANNELS_PER_STREAM_ON_WIRE
+
+    def _flatten(self, amp: np.ndarray) -> np.ndarray:
+        # amp: [n_samples, n_streams, CHANNELS_PER_STREAM_ON_WIRE]
+        n_samples, n_streams, n_wire = amp.shape
+        if self.channels_per_stream is None:
+            return amp.reshape(n_samples, -1)
+        if len(self.channels_per_stream) != n_streams:
+            raise ValueError(
+                f"Streamer was configured for {len(self.channels_per_stream)} datastreams "
+                f"but received {n_streams}"
+            )
+        if all(c == n_wire for c in self.channels_per_stream):
+            return amp.reshape(n_samples, -1)
+        return np.concatenate(
+            [amp[:, i, :c] for i, c in enumerate(self.channels_per_stream)], axis=1
+        )
 
 
 class RHDStreamer(DeviceStreamer):
+    CHANNELS_PER_STREAM_ON_WIRE = 32
 
     def create_stream_configs(self) -> Dict[str, StreamConfig]:
         return {
@@ -49,16 +102,14 @@ class RHDStreamer(DeviceStreamer):
                 )
         }
 
-    def num_channels(self) -> int:
-        return 32
-
     def get_amp_data_for_stream(self, stream_name: str, samples: "Samples") -> np.ndarray:
         if stream_name == 'continuous':
-            return samples.amp
+            return self._flatten(samples.amp)
         raise ValueError(f"Unknown stream for RHD: {stream_name}")
 
 
 class RHSStreamer(DeviceStreamer):
+    CHANNELS_PER_STREAM_ON_WIRE = 16
 
     def create_stream_configs(self) -> Dict[str, StreamConfig]:
         return {
@@ -66,14 +117,11 @@ class RHSStreamer(DeviceStreamer):
             'DC': StreamConfig('DC', 'DC', StreamConfig.BIT_VOLTS_DC, StreamConfig.OFFSET_DC)
         }
 
-    def num_channels(self) -> int:
-        return 16
-
     def get_amp_data_for_stream(self, stream_name: str, samples: "Samples") -> np.ndarray:
         if stream_name == 'AC':
-            return samples.amp[..., 1]
+            return self._flatten(samples.amp[..., 1])
         elif stream_name == 'DC':
-            return samples.amp[..., 0]
+            return self._flatten(samples.amp[..., 0])
         raise ValueError(f"Unknown stream for RHS: {stream_name}")
 
 
